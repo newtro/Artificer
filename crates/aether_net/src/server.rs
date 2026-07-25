@@ -112,7 +112,12 @@ async fn handle_connection(
     events: UnboundedSender<ServerEvent>,
     senders: Senders,
 ) {
-    let ws = match tokio_tungstenite::accept_async(stream).await {
+    // Cap frame/message sizes: game messages are tiny; anything huge is
+    // hostile or broken and must not balloon server memory.
+    let mut ws_config = tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default();
+    ws_config.max_message_size = Some(256 * 1024);
+    ws_config.max_frame_size = Some(256 * 1024);
+    let ws = match tokio_tungstenite::accept_async_with_config(stream, Some(ws_config)).await {
         Ok(ws) => ws,
         Err(e) => {
             log::warn!("handshake failed from {peer}: {e}");
