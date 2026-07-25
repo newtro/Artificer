@@ -309,17 +309,25 @@ pub(crate) fn apply_scene_commands(world: &mut World) {
 }
 
 pub(crate) fn sync_active_camera(
+    mut commands: Commands,
     maps: Res<AdapterMaps>,
-    mut cameras: Query<(Entity, &mut Camera)>,
+    mut cameras: Query<(Entity, &mut Camera, Has<IsDefaultUiCamera>)>,
 ) {
     let active_entity = maps
         .active_camera
         .and_then(|id| maps.camera_nodes.get(&id))
         .copied();
-    for (entity, mut camera) in cameras.iter_mut() {
+    for (entity, mut camera, is_ui_default) in cameras.iter_mut() {
         let want = Some(entity) == active_entity;
         if camera.is_active != want {
             camera.is_active = want;
+        }
+        // UI always follows the active camera, otherwise Bevy UI cannot
+        // decide which of several cameras to render onto.
+        if want && !is_ui_default {
+            commands.entity(entity).insert(IsDefaultUiCamera);
+        } else if !want && is_ui_default {
+            commands.entity(entity).remove::<IsDefaultUiCamera>();
         }
     }
 }
