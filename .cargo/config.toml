@@ -1,0 +1,3 @@
+# Shared target dir with the TWFI workspace so Bevy and friends compile once.
+[build]
+target-dir = "D:/Repos/TWFI - Next Opus 5/.cargo-target"

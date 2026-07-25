@@ -1,0 +1,271 @@
+use crate::mesh::MeshData;
+use glam::{Mat4, Quat, Vec3};
+use serde::{Deserialize, Serialize};
+
+/// Scene node id, allocated by [`crate::SceneGraph`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, PartialOrd, Ord)]
+pub struct NodeId(pub u64);
+
+/// Registered mesh geometry id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct MeshId(pub u64);
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct TransformDesc {
+    pub translation: Vec3,
+    pub rotation: Quat,
+    pub scale: Vec3,
+}
+
+impl TransformDesc {
+    pub const IDENTITY: TransformDesc = TransformDesc {
+        translation: Vec3::ZERO,
+        rotation: Quat::IDENTITY,
+        scale: Vec3::ONE,
+    };
+
+    pub fn from_translation(translation: Vec3) -> Self {
+        Self {
+            translation,
+            ..Self::IDENTITY
+        }
+    }
+
+    pub fn from_translation_rotation(translation: Vec3, rotation: Quat) -> Self {
+        Self {
+            translation,
+            rotation,
+            scale: Vec3::ONE,
+        }
+    }
+
+    pub fn with_scale(mut self, scale: Vec3) -> Self {
+        self.scale = scale;
+        self
+    }
+
+    pub fn to_matrix(&self) -> Mat4 {
+        Mat4::from_scale_rotation_translation(self.scale, self.rotation, self.translation)
+    }
+
+    /// Compose: `self` is the parent, `child` is local.
+    pub fn mul(&self, child: &TransformDesc) -> TransformDesc {
+        TransformDesc {
+            translation: self.translation + self.rotation * (self.scale * child.translation),
+            rotation: self.rotation * child.rotation,
+            scale: self.scale * child.scale,
+        }
+    }
+
+    /// Unit vector the node is facing (-Z convention, matching the renderer).
+    pub fn forward(&self) -> Vec3 {
+        self.rotation * Vec3::NEG_Z
+    }
+
+    pub fn up(&self) -> Vec3 {
+        self.rotation * Vec3::Y
+    }
+
+    pub fn right(&self) -> Vec3 {
+        self.rotation * Vec3::X
+    }
+
+    /// A transform positioned at `eye` looking at `target`.
+    pub fn looking_at(eye: Vec3, target: Vec3, up: Vec3) -> Self {
+        let forward = (target - eye).normalize_or_zero();
+        let rotation = if forward.length_squared() > 0.0 {
+            Quat::from_mat4(&Mat4::look_to_rh(Vec3::ZERO, forward, up).inverse())
+        } else {
+            Quat::IDENTITY
+        };
+        Self {
+            translation: eye,
+            rotation,
+            scale: Vec3::ONE,
+        }
+    }
+}
+
+impl Default for TransformDesc {
+    fn default() -> Self {
+        Self::IDENTITY
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum AlphaModeDesc {
+    #[default]
+    Opaque,
+    Blend,
+    /// Additive blending — glows, holograms, energy effects.
+    Add,
+}
+
+/// PBR-ish material description. `emissive` components may exceed 1.0 to
+/// drive bloom on HDR cameras.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct MaterialDesc {
+    pub base_color: [f32; 4],
+    pub metallic: f32,
+    pub roughness: f32,
+    pub emissive: [f32; 3],
+    pub unlit: bool,
+    pub alpha: AlphaModeDesc,
+    pub double_sided: bool,
+}
+
+impl Default for MaterialDesc {
+    fn default() -> Self {
+        Self {
+            base_color: [0.8, 0.8, 0.8, 1.0],
+            metallic: 0.0,
+            roughness: 0.6,
+            emissive: [0.0, 0.0, 0.0],
+            unlit: false,
+            alpha: AlphaModeDesc::Opaque,
+            double_sided: false,
+        }
+    }
+}
+
+impl MaterialDesc {
+    pub fn color(r: f32, g: f32, b: f32) -> Self {
+        Self {
+            base_color: [r, g, b, 1.0],
+            ..Default::default()
+        }
+    }
+
+    pub fn metal(r: f32, g: f32, b: f32, roughness: f32) -> Self {
+        Self {
+            base_color: [r, g, b, 1.0],
+            metallic: 1.0,
+            roughness,
+            ..Default::default()
+        }
+    }
+
+    /// Emissive surface; `intensity` > 1 blooms on HDR cameras.
+    pub fn glow(r: f32, g: f32, b: f32, intensity: f32) -> Self {
+        Self {
+            base_color: [0.0, 0.0, 0.0, 1.0],
+            emissive: [r * intensity, g * intensity, b * intensity],
+            ..Default::default()
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum LightDesc {
+    Directional {
+        color: [f32; 3],
+        illuminance: f32,
+        shadows: bool,
+    },
+    Point {
+        color: [f32; 3],
+        intensity: f32,
+        range: f32,
+        shadows: bool,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct BloomDesc {
+    /// 0.0 = off, ~0.15 natural, higher = dreamy.
+    pub intensity: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum ToneMapDesc {
+    None,
+    Reinhard,
+    /// Filmic display transform (TonyMcMapface under the Bevy adapter).
+    #[default]
+    Filmic,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct CameraDesc {
+    pub fov_y_degrees: f32,
+    pub near: f32,
+    pub far: f32,
+    pub hdr: bool,
+    pub bloom: Option<BloomDesc>,
+    pub tonemapping: ToneMapDesc,
+}
+
+impl Default for CameraDesc {
+    fn default() -> Self {
+        Self {
+            fov_y_degrees: 60.0,
+            near: 0.1,
+            far: 20_000.0,
+            hdr: true,
+            bloom: Some(BloomDesc { intensity: 0.15 }),
+            tonemapping: ToneMapDesc::Filmic,
+        }
+    }
+}
+
+/// Global rendering environment.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct EnvironmentDesc {
+    pub clear_color: [f32; 4],
+    pub ambient_color: [f32; 3],
+    pub ambient_brightness: f32,
+}
+
+impl Default for EnvironmentDesc {
+    fn default() -> Self {
+        Self {
+            clear_color: [0.0, 0.0, 0.0, 1.0],
+            ambient_color: [1.0, 1.0, 1.0],
+            ambient_brightness: 80.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum NodeKind {
+    Mesh { mesh: MeshId, material: MaterialDesc },
+    Light(LightDesc),
+    Camera(CameraDesc),
+    Group,
+}
+
+/// The serializable mutation stream consumed by render adapters.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SceneCommand {
+    AddMesh {
+        id: MeshId,
+        data: MeshData,
+    },
+    Spawn {
+        id: NodeId,
+        parent: Option<NodeId>,
+        transform: TransformDesc,
+        kind: NodeKind,
+    },
+    SetTransform {
+        id: NodeId,
+        transform: TransformDesc,
+    },
+    SetVisible {
+        id: NodeId,
+        visible: bool,
+    },
+    SetMaterial {
+        id: NodeId,
+        material: MaterialDesc,
+    },
+    Despawn {
+        id: NodeId,
+    },
+    SetActiveCamera {
+        id: NodeId,
+    },
+    SetEnvironment {
+        env: EnvironmentDesc,
+    },
+}

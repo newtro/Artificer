@@ -1,0 +1,16 @@
+[package]
+name = "minimal"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+aether_core = { workspace = true }
+aether_scene = { workspace = true }
+aether_physics = { workspace = true }
+aether_input = { workspace = true }
+aether_assets = { workspace = true }
+aether_render = { workspace = true }
+aether_testkit = { workspace = true }
+glam = { workspace = true }
