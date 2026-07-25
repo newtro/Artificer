@@ -333,6 +333,34 @@ impl PhysicsWorld {
 
     // ----- queries -----
 
+    /// All bodies whose colliders intersect a sphere (spatial query for
+    /// sensors, interest management, area effects). Returns handles with
+    /// their user data tags.
+    pub fn bodies_within(&self, center: Vec3, radius: f32) -> Vec<(BodyHandle, u64)> {
+        let qp = self.broad_phase.as_query_pipeline(
+            self.narrow_phase.query_dispatcher(),
+            &self.bodies,
+            &self.colliders,
+            QueryFilter::default(),
+        );
+        let shape = Ball::new(radius.max(0.001));
+        let pose = to_pose(center, Quat::IDENTITY);
+        let mut out = Vec::new();
+        for (collider_handle, _) in qp.intersect_shape(pose, &shape) {
+            if let Some(body) = self
+                .colliders
+                .get(collider_handle)
+                .and_then(|c| c.parent())
+                .map(BodyHandle)
+            {
+                if !out.iter().any(|(b, _)| *b == body) {
+                    out.push((body, self.user_data(body)));
+                }
+            }
+        }
+        out
+    }
+
     /// Cast a ray; returns the closest hit, optionally excluding one body.
     pub fn cast_ray(
         &self,
@@ -463,6 +491,31 @@ mod tests {
             fwd.x < -0.5,
             "after 2s at 1 rad/s about +Y, forward should point toward -X, got {fwd}"
         );
+    }
+
+    #[test]
+    fn bodies_within_finds_only_nearby() {
+        let mut world = PhysicsWorld::new_zero_gravity();
+        let near = world.add_dynamic(
+            Vec3::new(50.0, 0.0, 0.0),
+            Quat::IDENTITY,
+            DynamicBodyParams::default(),
+        );
+        world.attach_ball(near, 2.0, 1.0);
+        world.set_user_data(near, 11);
+        let far = world.add_dynamic(
+            Vec3::new(5_000.0, 0.0, 0.0),
+            Quat::IDENTITY,
+            DynamicBodyParams::default(),
+        );
+        world.attach_ball(far, 2.0, 1.0);
+        world.set_user_data(far, 22);
+        world.step(DT); // build broad-phase
+        let hits = world.bodies_within(Vec3::ZERO, 200.0);
+        assert_eq!(hits.len(), 1, "only the near body: {hits:?}");
+        assert_eq!(hits[0].1, 11);
+        let all = world.bodies_within(Vec3::ZERO, 10_000.0);
+        assert_eq!(all.len(), 2);
     }
 
     #[test]
