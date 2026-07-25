@@ -7,6 +7,7 @@ members = [
     "crates/aether_input",
     "crates/aether_assets",
     "crates/aether_render",
+    "crates/aether_net",
     "crates/aether_testkit",
     "samples/minimal",
 ]
@@ -24,6 +25,7 @@ aether_physics = { path = "crates/aether_physics" }
 aether_input = { path = "crates/aether_input" }
 aether_assets = { path = "crates/aether_assets" }
 aether_render = { path = "crates/aether_render" }
+aether_net = { path = "crates/aether_net" }
 aether_testkit = { path = "crates/aether_testkit" }
 
 glam = { version = "0.29", features = ["serde"] }
@@ -31,6 +33,11 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rapier3d = "0.34"
 log = "0.4"
+postcard = { version = "1", features = ["use-std"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync", "io-util"] }
+tokio-tungstenite = "0.30"
+tungstenite = "0.30"
+futures-util = "0.3"
 
 [workspace.dependencies.bevy]
 version = "0.16"

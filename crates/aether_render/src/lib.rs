@@ -9,9 +9,11 @@
 
 mod convert;
 mod keymap;
+pub mod labels;
 mod systems;
 
 pub use bevy;
+pub use labels::{WorldLabel, WorldLabels};
 
 use aether_input::InputState;
 use aether_scene::SceneGraph;
@@ -54,6 +56,8 @@ pub struct EngineCtx<'a> {
     pub window_size: Vec2,
     /// Dynamic values for the game's UI layer (see [`HudBoard`]).
     pub hud: &'a mut HudBoard,
+    /// World-space labels to render this frame (cleared each frame).
+    pub labels: &'a mut WorldLabels,
     pub(crate) exit_requested: bool,
 }
 
@@ -63,8 +67,10 @@ impl EngineCtx<'_> {
     }
 }
 
-/// The game's hook into the engine frame loop.
-pub trait GameClient: Send + Sync + 'static {
+/// The game's hook into the engine frame loop. Runs on the main thread as a
+/// non-send resource, so games may hold platform handles (sockets, JS
+/// objects) without artificial thread-safety requirements.
+pub trait GameClient: 'static {
     /// Called once after the renderer is ready.
     fn setup(&mut self, ctx: &mut EngineCtx);
 
@@ -98,7 +104,7 @@ pub(crate) struct SceneRes(pub SceneGraph);
 #[derive(Resource)]
 pub(crate) struct InputRes(pub InputState);
 
-#[derive(Resource)]
+/// Held as a NON-SEND resource: game code always runs on the main thread.
 pub(crate) struct GameRes(pub Box<dyn GameClient>);
 
 #[derive(Resource, Default)]
@@ -128,11 +134,12 @@ pub fn run_app(config: RenderConfig, game: impl GameClient) {
 
     game.register_bevy(&mut app);
 
-    app.insert_resource(SceneRes(SceneGraph::new()))
+    app.add_plugins(labels::WorldLabelPlugin)
+        .insert_resource(SceneRes(SceneGraph::new()))
         .insert_resource(InputRes(InputState::new()))
         .insert_resource(HudBoard::default())
         .insert_resource(FrameInfo::default())
-        .insert_resource(GameRes(Box::new(game)))
+        .insert_non_send_resource(GameRes(Box::new(game)))
         .insert_resource(ClearColor(Color::BLACK))
         .insert_resource(systems::AdapterMaps::default())
         .add_systems(Startup, systems::game_setup)

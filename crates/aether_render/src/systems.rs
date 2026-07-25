@@ -80,9 +80,15 @@ fn with_ctx(world: &mut World, f: impl FnOnce(&mut dyn crate::GameClient, &mut E
     let dt = world.resource::<Time>().delta_secs();
     let elapsed = world.resource::<Time>().elapsed_secs();
     let window_size = world.resource::<FrameInfo>().window_size;
-    world.resource_scope(|world, mut game: Mut<GameRes>| {
-        world.resource_scope(|world, mut scene: Mut<SceneRes>| {
-            world.resource_scope(|world, mut hud: Mut<crate::HudBoard>| {
+    // GameRes is non-send (game code owns sockets/JS handles); temporarily
+    // detach it from the world while it borrows the other resources.
+    let mut game = world
+        .remove_non_send_resource::<GameRes>()
+        .expect("GameRes present");
+    world.resource_scope(|world, mut scene: Mut<SceneRes>| {
+        world.resource_scope(|world, mut hud: Mut<crate::HudBoard>| {
+            world.resource_scope(|world, mut labels: Mut<crate::WorldLabels>| {
+                labels.0.clear();
                 let input = world.resource::<InputRes>();
                 let mut ctx = EngineCtx {
                     scene: &mut scene.0,
@@ -91,6 +97,7 @@ fn with_ctx(world: &mut World, f: impl FnOnce(&mut dyn crate::GameClient, &mut E
                     elapsed,
                     window_size,
                     hud: &mut hud,
+                    labels: &mut labels,
                     exit_requested: false,
                 };
                 f(game.0.as_mut(), &mut ctx);
@@ -100,6 +107,7 @@ fn with_ctx(world: &mut World, f: impl FnOnce(&mut dyn crate::GameClient, &mut E
             });
         });
     });
+    world.insert_non_send_resource(game);
 }
 
 pub(crate) fn game_setup(world: &mut World) {
