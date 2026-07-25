@@ -218,7 +218,13 @@ impl PhysicsWorld {
             .insert_with_parent(c, body.0, &mut self.bodies);
     }
 
-    pub fn attach_capsule_z(&mut self, body: BodyHandle, half_height: f32, radius: f32, density: f32) {
+    pub fn attach_capsule_z(
+        &mut self,
+        body: BodyHandle,
+        half_height: f32,
+        radius: f32,
+        density: f32,
+    ) {
         let c = ColliderBuilder::capsule_z(half_height, radius)
             .density(density)
             .active_events(ActiveEvents::COLLISION_EVENTS)
@@ -314,7 +320,8 @@ impl PhysicsWorld {
             };
             if let (Some(a), Some(b)) = (body_of(h1, &self.colliders), body_of(h2, &self.colliders))
             {
-                self.pending_contacts.push(CollisionContact { a, b, started });
+                self.pending_contacts
+                    .push(CollisionContact { a, b, started });
             }
         }
     }
@@ -346,7 +353,11 @@ impl PhysicsWorld {
         );
         let ray = Ray::new(to_r(origin), to_r(dir.normalize_or_zero()));
         let (collider_handle, toi) = qp.cast_ray(&ray, max_distance, true)?;
-        let body = self.colliders.get(collider_handle)?.parent().map(BodyHandle)?;
+        let body = self
+            .colliders
+            .get(collider_handle)?
+            .parent()
+            .map(BodyHandle)?;
         let hit_point = origin + dir.normalize_or_zero() * toi;
         Some(RayHit {
             body,
@@ -373,7 +384,11 @@ mod tests {
             world.step(DT);
         }
         let (pos, _) = world.pose(body).unwrap();
-        assert!((pos.x - 1.0).abs() < 0.05, "expected ~1m travel, got {}", pos.x);
+        assert!(
+            (pos.x - 1.0).abs() < 0.05,
+            "expected ~1m travel, got {}",
+            pos.x
+        );
         assert!(pos.y.abs() < 1e-3 && pos.z.abs() < 1e-3);
     }
 
@@ -407,7 +422,11 @@ mod tests {
     #[test]
     fn collision_events_reported() {
         let mut world = PhysicsWorld::new_zero_gravity();
-        let a = world.add_dynamic(Vec3::new(-2.0, 0.0, 0.0), Quat::IDENTITY, DynamicBodyParams::default());
+        let a = world.add_dynamic(
+            Vec3::new(-2.0, 0.0, 0.0),
+            Quat::IDENTITY,
+            DynamicBodyParams::default(),
+        );
         world.attach_ball(a, 0.5, 1.0);
         let b = world.add_fixed(Vec3::ZERO, Quat::IDENTITY);
         world.attach_ball(b, 0.5, 1.0);

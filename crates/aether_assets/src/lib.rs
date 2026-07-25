@@ -7,8 +7,8 @@
 pub mod manifest;
 pub mod procmesh;
 
+pub use manifest::validate_asset;
 pub use manifest::{
     AssetCategory, AssetManifest, AssetRecord, CollisionProxy, LodPolicy, PerfBudget, Socket,
     ValidationIssue,
 };
-pub use manifest::validate_asset;

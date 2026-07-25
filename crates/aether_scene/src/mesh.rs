@@ -72,8 +72,11 @@ impl MeshData {
         if self.uvs.len() != n {
             return Err(format!("uv count {} != vertex count {}", self.uvs.len(), n));
         }
-        if self.indices.is_empty() || self.indices.len() % 3 != 0 {
-            return Err(format!("index count {} not a triangle list", self.indices.len()));
+        if self.indices.is_empty() || !self.indices.len().is_multiple_of(3) {
+            return Err(format!(
+                "index count {} not a triangle list",
+                self.indices.len()
+            ));
         }
         if let Some(&bad) = self.indices.iter().find(|&&i| i as usize >= n) {
             return Err(format!("index {} out of range ({} vertices)", bad, n));

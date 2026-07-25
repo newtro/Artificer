@@ -228,7 +228,10 @@ impl Default for EnvironmentDesc {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum NodeKind {
-    Mesh { mesh: MeshId, material: MaterialDesc },
+    Mesh {
+        mesh: MeshId,
+        material: MaterialDesc,
+    },
     Light(LightDesc),
     Camera(CameraDesc),
     Group,

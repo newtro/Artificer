@@ -109,24 +109,22 @@ pub(crate) struct FrameInfo {
 /// Build and run the windowed application. Blocks until exit.
 pub fn run_app(config: RenderConfig, game: impl GameClient) {
     let mut app = App::new();
-    app.add_plugins(
-        DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: config.title.clone(),
-                resolution: (config.width, config.height).into(),
-                present_mode: if config.vsync {
-                    PresentMode::AutoVsync
-                } else {
-                    PresentMode::AutoNoVsync
-                },
-                canvas: config.canvas.clone(),
-                fit_canvas_to_parent: true,
-                prevent_default_event_handling: true,
-                ..Default::default()
-            }),
+    app.add_plugins(DefaultPlugins.set(WindowPlugin {
+        primary_window: Some(Window {
+            title: config.title.clone(),
+            resolution: (config.width, config.height).into(),
+            present_mode: if config.vsync {
+                PresentMode::AutoVsync
+            } else {
+                PresentMode::AutoNoVsync
+            },
+            canvas: config.canvas.clone(),
+            fit_canvas_to_parent: true,
+            prevent_default_event_handling: true,
             ..Default::default()
         }),
-    );
+        ..Default::default()
+    }));
 
     game.register_bevy(&mut app);
 

@@ -125,7 +125,10 @@ pub(crate) fn apply_scene_commands(world: &mut World) {
                 let handle = world
                     .resource_mut::<Assets<Mesh>>()
                     .add(to_bevy_mesh(&data));
-                world.resource_mut::<AdapterMaps>().meshes.insert(id, handle);
+                world
+                    .resource_mut::<AdapterMaps>()
+                    .meshes
+                    .insert(id, handle);
             }
             SceneCommand::Spawn {
                 id,
@@ -231,7 +234,11 @@ pub(crate) fn apply_scene_commands(world: &mut World) {
                 };
 
                 if let Some(parent_id) = parent {
-                    let parent_entity = world.resource::<AdapterMaps>().nodes.get(&parent_id).copied();
+                    let parent_entity = world
+                        .resource::<AdapterMaps>()
+                        .nodes
+                        .get(&parent_id)
+                        .copied();
                     match parent_entity {
                         Some(pe) => {
                             world.entity_mut(pe).add_child(entity);

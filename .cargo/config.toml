@@ -1,3 +1,4 @@
 # Shared target dir with the TWFI workspace so Bevy and friends compile once.
+# Config-relative: resolved against this workspace root on any checkout path.
 [build]
-target-dir = "D:/Repos/TWFI - Next Opus 5/.cargo-target"
+target-dir = "../.cargo-target"

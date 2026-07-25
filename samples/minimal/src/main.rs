@@ -8,9 +8,7 @@ use aether_assets::procmesh;
 use aether_input::Key;
 use aether_physics::{DynamicBodyParams, PhysicsWorld};
 use aether_render::{run_app, EngineCtx, GameClient, RenderConfig};
-use aether_scene::{
-    CameraDesc, EnvironmentDesc, LightDesc, MaterialDesc, NodeId, TransformDesc,
-};
+use aether_scene::{CameraDesc, EnvironmentDesc, LightDesc, MaterialDesc, NodeId, TransformDesc};
 use aether_testkit::{run_scenario, Scenario, ScenarioCtx};
 use glam::{Quat, Vec3};
 
@@ -39,7 +37,8 @@ impl Scenario for DriftScenario {
             .add_dynamic(Vec3::ZERO, Quat::IDENTITY, DynamicBodyParams::default());
         self.world.attach_ball(body, 0.5, 1.0);
         let mass = self.world.mass(body);
-        self.world.apply_impulse(body, Vec3::new(2.0, 0.0, 0.0) * mass);
+        self.world
+            .apply_impulse(body, Vec3::new(2.0, 0.0, 0.0) * mass);
         self.body = Some(body);
     }
 

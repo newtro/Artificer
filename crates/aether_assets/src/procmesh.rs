@@ -150,7 +150,12 @@ pub fn cone(radius: f32, height: f32, segments: u32) -> MeshData {
 }
 
 /// Torus in the XZ plane, centered on pivot.
-pub fn torus(major_radius: f32, minor_radius: f32, major_segments: u32, minor_segments: u32) -> MeshData {
+pub fn torus(
+    major_radius: f32,
+    minor_radius: f32,
+    major_segments: u32,
+    minor_segments: u32,
+) -> MeshData {
     let major_segments = major_segments.max(3);
     let minor_segments = minor_segments.max(3);
     let mut mesh = MeshData::default();
@@ -166,7 +171,8 @@ pub fn torus(major_radius: f32, minor_radius: f32, major_segments: u32, minor_se
             let theta = v * TAU;
             let (sin_t, cos_t) = theta.sin_cos();
             let normal = ring_dir * cos_t + Vec3::Y * sin_t;
-            mesh.positions.push((ring_center + normal * minor_radius).to_array());
+            mesh.positions
+                .push((ring_center + normal * minor_radius).to_array());
             mesh.normals.push(normal.to_array());
             mesh.uvs.push([u, v]);
         }
@@ -278,10 +284,7 @@ pub fn merge(parts: &[MeshData]) -> MeshData {
 /// Merge with per-part placement — the workhorse for composing multi-part
 /// ships and stations out of primitives.
 pub fn merge_placed(parts: &[(MeshData, TransformDesc)]) -> MeshData {
-    let transformed: Vec<MeshData> = parts
-        .iter()
-        .map(|(m, t)| transform_mesh(m, t))
-        .collect();
+    let transformed: Vec<MeshData> = parts.iter().map(|(m, t)| transform_mesh(m, t)).collect();
     merge(&transformed)
 }
 

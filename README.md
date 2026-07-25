@@ -13,7 +13,7 @@ boundary contract and `docs/adr/` for architecture decisions.
 | `aether_input` | Input state + action mapping abstraction | no |
 | `aether_assets` | Procedural mesh builders, asset manifest + validation | no |
 | `aether_render` | Bevy adapter: runs the app, syncs scene, input, cameras; sanctioned Bevy extension surface | yes |
-| `aether_testkit` | Scenario runner, deterministic assertions, replay | no |
+| `aether_testkit` | Scenario runner, deterministic assertions, replay-ready logs (full replay lands at M4) | no |
 | `samples/minimal` | Engine generality proof — builds with public APIs only | yes |
 
 ## Quick start

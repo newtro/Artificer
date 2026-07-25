@@ -33,6 +33,16 @@ Constraints that keep the boundary honest:
 3. If a second game needs the same extension pattern, it uses the same
    surface — nothing TWFI-specific enters the engine.
 
+## Amendment (M1): direct `bevy` dependency for derive macros
+
+Bevy's derive macros (`#[derive(Component)]` etc.) resolve crate paths from
+the *calling* crate's manifest, so game client crates additionally declare a
+direct `bevy` dependency pinned to the exact engine version with
+`default-features = false` and no extra features (cargo unifies it with the
+engine's build — zero additional compilation). The sanctioned surface for
+everything else remains `aether_render::bevy`; the direct dependency exists
+only so derives compile, and must never widen the feature set.
+
 ## Consequences
 
 - The star map and cockpit can use full-fidelity custom shaders without

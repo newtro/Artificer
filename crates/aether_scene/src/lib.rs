@@ -127,7 +127,8 @@ impl SceneGraph {
     pub fn set_transform(&mut self, id: NodeId, transform: TransformDesc) {
         if let Some(state) = self.nodes.get_mut(&id) {
             state.transform = transform;
-            self.commands.push(SceneCommand::SetTransform { id, transform });
+            self.commands
+                .push(SceneCommand::SetTransform { id, transform });
         }
     }
 
@@ -143,7 +144,8 @@ impl SceneGraph {
     pub fn set_material(&mut self, id: NodeId, material: MaterialDesc) {
         if let Some(state) = self.nodes.get(&id) {
             if state.kind_tag == NodeKindTag::Mesh {
-                self.commands.push(SceneCommand::SetMaterial { id, material });
+                self.commands
+                    .push(SceneCommand::SetMaterial { id, material });
             }
         }
     }
@@ -224,7 +226,10 @@ mod tests {
             TransformDesc::from_translation(Vec3::new(1.0, 2.0, 3.0)),
         );
         assert!(sg.contains(node));
-        assert_eq!(sg.transform(node).unwrap().translation, Vec3::new(1.0, 2.0, 3.0));
+        assert_eq!(
+            sg.transform(node).unwrap().translation,
+            Vec3::new(1.0, 2.0, 3.0)
+        );
         let cmds = sg.drain_commands();
         assert_eq!(cmds.len(), 2); // AddMesh + Spawn
         assert!(!sg.has_pending());
@@ -235,7 +240,8 @@ mod tests {
         let mut sg = SceneGraph::new();
         let root = sg.spawn_group(TransformDesc::IDENTITY);
         let mesh = sg.add_mesh(MeshData::unit_test_triangle());
-        let child = sg.spawn_mesh_child(root, mesh, MaterialDesc::default(), TransformDesc::IDENTITY);
+        let child =
+            sg.spawn_mesh_child(root, mesh, MaterialDesc::default(), TransformDesc::IDENTITY);
         sg.drain_commands();
         sg.despawn(root);
         assert!(!sg.contains(root));

@@ -22,9 +22,16 @@ pub enum AssetCategory {
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum CollisionProxy {
     /// Half-extents of a box centered on the pivot.
-    Cuboid { half_extents: [f32; 3] },
-    Ball { radius: f32 },
-    CapsuleZ { half_height: f32, radius: f32 },
+    Cuboid {
+        half_extents: [f32; 3],
+    },
+    Ball {
+        radius: f32,
+    },
+    CapsuleZ {
+        half_height: f32,
+        radius: f32,
+    },
     /// Deliberately no collision (pure visual effects).
     None,
 }
@@ -124,12 +131,18 @@ pub fn validate_asset(record: &AssetRecord, mesh: &MeshData) -> Vec<ValidationIs
         return issues; // structural failure makes the rest meaningless
     }
     if record.unit_scale <= 0.0 || !record.unit_scale.is_finite() {
-        issues.push(issue(id, format!("unit_scale {} not positive", record.unit_scale)));
+        issues.push(issue(
+            id,
+            format!("unit_scale {} not positive", record.unit_scale),
+        ));
     }
     if record.orientation != "y-up,-z-forward" {
         issues.push(issue(
             id,
-            format!("orientation '{}' != engine convention 'y-up,-z-forward'", record.orientation),
+            format!(
+                "orientation '{}' != engine convention 'y-up,-z-forward'",
+                record.orientation
+            ),
         ));
     }
 
@@ -157,7 +170,10 @@ pub fn validate_asset(record: &AssetRecord, mesh: &MeshData) -> Vec<ValidationIs
         max: actual.max + Vec3::splat(tolerance),
     };
     if !grown.contains(pivot) {
-        issues.push(issue(id, format!("pivot {pivot:?} lies outside geometry bounds")));
+        issues.push(issue(
+            id,
+            format!("pivot {pivot:?} lies outside geometry bounds"),
+        ));
     }
 
     for socket in &record.sockets {
@@ -210,9 +226,15 @@ pub fn validate_asset(record: &AssetRecord, mesh: &MeshData) -> Vec<ValidationIs
                 issues.push(issue(id, "ball collision proxy has non-positive radius"));
             }
         }
-        CollisionProxy::CapsuleZ { half_height, radius } => {
+        CollisionProxy::CapsuleZ {
+            half_height,
+            radius,
+        } => {
             if half_height <= 0.0 || radius <= 0.0 {
-                issues.push(issue(id, "capsule collision proxy has non-positive dimensions"));
+                issues.push(issue(
+                    id,
+                    "capsule collision proxy has non-positive dimensions",
+                ));
             }
         }
         CollisionProxy::None => {}

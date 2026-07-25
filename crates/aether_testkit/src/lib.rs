@@ -3,8 +3,9 @@
 //! A [`Scenario`] owns its world, runs a fixed number of ticks, then
 //! verifies checks. The runner produces a serializable [`ScenarioReport`]
 //! so results can be asserted in tests, diffed in CI, and inspected by
-//! humans and agents alike. Replay of recorded inputs builds on
-//! `aether_core::events::TimestampedLog`.
+//! humans and agents alike. Input/event replay (M4 roadmap) will build on
+//! `aether_core::events::TimestampedLog`, which provides the recording
+//! primitives today.
 
 use aether_core::rng::SeededRng;
 use aether_core::tick::Tick;
@@ -53,7 +54,10 @@ impl ScenarioCtx {
 
     /// Append a sample to a named metric series.
     pub fn record(&mut self, metric: &str, value: f64) {
-        self.metrics.entry(metric.to_string()).or_default().push(value);
+        self.metrics
+            .entry(metric.to_string())
+            .or_default()
+            .push(value);
     }
 }
 
