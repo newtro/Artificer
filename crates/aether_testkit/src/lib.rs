@@ -3,9 +3,11 @@
 //! A [`Scenario`] owns its world, runs a fixed number of ticks, then
 //! verifies checks. The runner produces a serializable [`ScenarioReport`]
 //! so results can be asserted in tests, diffed in CI, and inspected by
-//! humans and agents alike. Input/event replay (M4 roadmap) will build on
-//! `aether_core::events::TimestampedLog`, which provides the recording
-//! primitives today.
+//! humans and agents alike. The [`replay`] module provides the
+//! event-log/fold discipline (§9.1 commands, events, replay) that games
+//! use to prove their ledgers reproduce end state.
+
+pub mod replay;
 
 use aether_core::rng::SeededRng;
 use aether_core::tick::Tick;

@@ -111,7 +111,12 @@ impl AgentLoop {
                     }
                     TransportEvent::Closed(reason) => {
                         client.on_closed(reason.clone());
-                        outcome.ended = format!("closed: {reason}");
+                        // A goal reached in the same poll batch as the
+                        // disconnect is still a reached goal: the agent's
+                        // own verdict outranks how the socket ended.
+                        outcome.ended = client
+                            .finished()
+                            .unwrap_or_else(|| format!("closed: {reason}"));
                         break 'session;
                     }
                 }
