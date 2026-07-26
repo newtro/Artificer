@@ -1,0 +1,10 @@
+[package]
+name = "aether_agent"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+aether_net = { workspace = true }
+log = { workspace = true }
