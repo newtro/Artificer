@@ -14,7 +14,7 @@ a sibling-path override; semantic versioning begins after MVP stabilization.
 - App lifecycle and plugin boundary (`aether_core`)
 - Fixed ticks, scheduling, deterministic time, seeded RNG (`aether_core`)
 - Entity id allocation and reusable simulation primitives (`aether_core`)
-- Commands, events, snapshots, and replay primitives (`aether_core::events`, `aether_testkit`; full replay lands at M4)
+- Commands, events, snapshots, and replay (`aether_core::events` for tick-scoped queues; `aether_testkit::replay` for the EventLog + fold discipline games use to prove persistent ledgers reproduce end state)
 - Renderer-neutral scene API (`aether_scene`)
 - Bevy/wgpu rendering adapter (`aether_render`)
 - Rapier physics adapter (`aether_physics`)

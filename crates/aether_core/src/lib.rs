@@ -6,14 +6,12 @@
 
 pub mod events;
 pub mod id;
-pub mod plugin;
 pub mod rng;
 pub mod tick;
 pub mod time;
 
 pub use events::EventQueue;
 pub use id::{EntityId, IdAllocator};
-pub use plugin::{SimApp, SimContext, SimPlugin};
 pub use rng::SeededRng;
 pub use tick::{FixedTicker, Tick};
 pub use time::SimTime;
