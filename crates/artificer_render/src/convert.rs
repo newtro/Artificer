@@ -1,6 +1,8 @@
 //! artificer_scene -> Bevy type conversions.
 
-use artificer_scene::{AlphaModeDesc, MaterialDesc, MeshData, ToneMapDesc, TransformDesc};
+use artificer_scene::{
+    AlphaModeDesc, MaterialDesc, MeshData, TextureSampling, ToneMapDesc, TransformDesc,
+};
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::prelude::*;
 use bevy::render::mesh::Indices;
@@ -25,6 +27,33 @@ pub(crate) fn to_bevy_mesh(data: &MeshData) -> Mesh {
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, data.uvs.clone());
     mesh.insert_indices(Indices::U32(data.indices.clone()));
     mesh
+}
+
+/// Decode a PNG into a Bevy image with the sampler the material asked for.
+///
+/// Atlas pages need NEAREST: neighbouring swatches sit pixels apart on one
+/// page, and bilinear filtering bleeds one swatch into the next along every
+/// UV seam — the classic "why does this hull have a stripe of the wrong
+/// colour along its edge" artifact.
+pub(crate) fn decode_texture(
+    png: &[u8],
+    sampling: TextureSampling,
+) -> Result<Image, bevy::image::TextureError> {
+    let mut image = Image::from_buffer(
+        png,
+        bevy::image::ImageType::Extension("png"),
+        bevy::image::CompressedImageFormats::NONE,
+        // Base-colour textures are authored in sRGB.
+        true,
+        bevy::image::ImageSampler::Default,
+        RenderAssetUsages::default(),
+    )?;
+    let descriptor = match sampling {
+        TextureSampling::Nearest => bevy::image::ImageSamplerDescriptor::nearest(),
+        TextureSampling::Linear => bevy::image::ImageSamplerDescriptor::linear(),
+    };
+    image.sampler = bevy::image::ImageSampler::Descriptor(descriptor);
+    Ok(image)
 }
 
 pub(crate) fn to_std_material(desc: &MaterialDesc) -> StandardMaterial {

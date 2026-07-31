@@ -22,6 +22,7 @@ pub mod error;
 pub mod fbx;
 pub mod gltf;
 pub mod source;
+pub mod texture;
 
 pub use error::ImportError;
 pub use source::{SourceMesh, SourcePart, SourceScene};
@@ -102,6 +103,14 @@ pub fn import_manifest(root: &Path, manifest: &ImportManifest) -> Result<AssetPa
     }
 
     let mut pack = AssetPack::new();
+
+    // Textures first: an asset's material references one by id, and baking
+    // them up front means a dangling reference is caught by pack validation
+    // rather than by a blank surface at runtime.
+    for texture in &manifest.textures {
+        texture::bake_texture(&mut pack, root, texture)?;
+    }
+
     // Keyed by (source id, axis frame) because the frame decides whether the
     // reader converts, so the same file under two frames is two scenes.
     let mut cache: Vec<(String, artificer_assets::AxisConvention, SourceScene)> = Vec::new();

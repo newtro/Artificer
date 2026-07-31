@@ -11,10 +11,12 @@
 //! `artificer_assets_import` crate, so a WASM build physically cannot pull a
 //! model parser into the bundle.
 
+pub mod load;
 pub mod manifest;
 pub mod pack;
 pub mod procmesh;
 
+pub use load::{load_pack, LoadedPack};
 pub use manifest::{collision_proxy_problem, material_problem, validate_asset};
 pub use manifest::{
     AssetCategory, AssetManifest, AssetRecord, Axis, AxisConvention, CollisionProxy,

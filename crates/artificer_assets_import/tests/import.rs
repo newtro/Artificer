@@ -980,3 +980,116 @@ fn a_corrupt_model_file_is_an_error_not_a_panic() {
         );
     }
 }
+
+// ----- textures and atlas materials (A4) -----
+
+fn atlas_manifest(max_size: Option<u32>) -> ImportManifest {
+    let mut import = base_import("ship", "src");
+    import.material = MaterialMapping::Atlas {
+        texture: "page".into(),
+    };
+    ImportManifest {
+        sources: vec![ImportSource {
+            id: "src".into(),
+            path: "craft_racer.fbx".into(),
+            format: SourceFormat::Auto,
+        }],
+        textures: vec![artificer_assets::TextureImport {
+            id: "page".into(),
+            path: "colormap.png".into(),
+            max_size,
+            sampler: artificer_assets::SamplerMode::Nearest,
+        }],
+        meshes: vec![import],
+    }
+}
+
+#[test]
+fn a_texture_is_baked_into_the_pack_and_bound_to_its_material() {
+    let pack = import_manifest(&fixtures(), &atlas_manifest(None)).expect("should import");
+    let texture = pack.texture("page").expect("texture in pack");
+    assert_eq!((texture.width, texture.height), (512, 512));
+    // Encoded PNG, not raw pixels: 512x512 RGBA raw would be a megabyte.
+    assert!(texture.png.len() < 200_000, "{} bytes", texture.png.len());
+
+    let material = pack.material("atlas.page").expect("atlas material");
+    assert_eq!(material.base_color_texture.as_deref(), Some("page"));
+    assert_eq!(pack.validate(), vec![]);
+}
+
+#[test]
+fn max_size_downscales_at_bake_time() {
+    // Source packs ship 4096-square pages at ~3.3 MB each, which would
+    // dominate a browser bundle on their own. Shrinking happens once, here --
+    // paying for it on every cold start would be worse.
+    let pack = import_manifest(&fixtures(), &atlas_manifest(Some(128))).expect("should import");
+    let texture = pack.texture("page").expect("texture in pack");
+    assert_eq!((texture.width, texture.height), (128, 128));
+    assert_eq!(pack.validate(), vec![], "declared size must match the PNG");
+
+    let full = import_manifest(&fixtures(), &atlas_manifest(None)).unwrap();
+    assert!(
+        texture.png.len() < full.texture("page").unwrap().png.len(),
+        "downscaling should shrink the bytes"
+    );
+}
+
+#[test]
+fn a_texture_already_within_max_size_keeps_its_original_bytes() {
+    // Re-encoding is lossless but not byte-identical across image-crate
+    // versions, which would make bakes differ for no gain.
+    let untouched = import_manifest(&fixtures(), &atlas_manifest(None)).unwrap();
+    let generous = import_manifest(&fixtures(), &atlas_manifest(Some(4096))).unwrap();
+    assert_eq!(
+        untouched.texture("page").unwrap().png,
+        generous.texture("page").unwrap().png
+    );
+    let on_disk = std::fs::read(fixtures().join("colormap.png")).unwrap();
+    assert_eq!(untouched.texture("page").unwrap().png, on_disk);
+}
+
+#[test]
+fn baking_a_textured_pack_twice_is_byte_identical() {
+    let build = || {
+        import_manifest(&fixtures(), &atlas_manifest(Some(256)))
+            .unwrap()
+            .to_postcard_current()
+            .unwrap()
+    };
+    assert_eq!(build(), build());
+}
+
+#[test]
+fn a_missing_texture_file_names_the_path() {
+    let mut manifest = atlas_manifest(None);
+    manifest.textures[0].path = "no_such_atlas.png".into();
+    let err = import_manifest(&fixtures(), &manifest)
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("no_such_atlas.png"), "got: {err}");
+}
+
+#[test]
+fn a_whole_kit_collapses_onto_one_atlas_material() {
+    // The draw-call property this pipeline exists to deliver: many assets,
+    // one page, one material.
+    let mut manifest = atlas_manifest(None);
+    manifest.sources.push(ImportSource {
+        id: "rocket".into(),
+        path: "rocket_baseA.fbx".into(),
+        format: SourceFormat::Auto,
+    });
+    for (id, source) in [("fins", "rocket"), ("base", "rocket")] {
+        let mut import = base_import(id, source);
+        import.material = MaterialMapping::Atlas {
+            texture: "page".into(),
+        };
+        manifest.meshes.push(import);
+    }
+    let pack = import_manifest(&fixtures(), &manifest).expect("should import");
+    assert_eq!(pack.len(), 3);
+    assert_eq!(pack.materials.len(), 1, "one atlas page, one material");
+    assert_eq!(pack.textures.len(), 1);
+    assert_eq!(pack.validate(), vec![]);
+    println!("{}", pack.size_report().unwrap());
+}

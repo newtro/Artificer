@@ -21,3 +21,7 @@ log = { workspace = true }
 ufbx = "0.11.2"
 # glTF/GLB. Default features give the import helpers and buffer/image loading.
 gltf = "1.4.1"
+# Bake-time only: decoding is needed solely to honour max_size downscaling.
+# The RUNTIME never decodes -- packs carry encoded PNG and the renderer has a
+# decoder already -- which is why this dependency stays on the native side.
+image = { version = "0.25", default-features = false, features = ["png"] }

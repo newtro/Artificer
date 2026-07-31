@@ -157,6 +157,7 @@ version = "0.1.0"
 dependencies = [
  "artificer_scene",
  "glam 0.29.3",
+ "log",
  "postcard",
  "serde",
  "serde_json",
@@ -170,6 +171,7 @@ dependencies = [
  "artificer_scene",
  "glam 0.29.3",
  "gltf",
+ "image",
  "log",
  "ufbx",
 ]

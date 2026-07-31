@@ -1,9 +1,11 @@
 //! Adapter systems: input collection, game callbacks, scene mirroring.
 
-use crate::convert::{to_bevy_mesh, to_bevy_transform, to_std_material, to_tonemapping};
+use crate::convert::{
+    decode_texture, to_bevy_mesh, to_bevy_transform, to_std_material, to_tonemapping,
+};
 use crate::keymap::KEY_PAIRS;
 use crate::{EngineCtx, FrameInfo, GameRes, InputRes, SceneRes};
-use artificer_scene::{LightDesc, MeshId, NodeId, NodeKind, SceneCommand};
+use artificer_scene::{LightDesc, MaterialDesc, MeshId, NodeId, NodeKind, SceneCommand, TextureId};
 use bevy::core_pipeline::bloom::Bloom;
 use bevy::input::mouse::{MouseMotion, MouseScrollUnit, MouseWheel};
 use bevy::prelude::*;
@@ -16,6 +18,7 @@ use std::collections::HashMap;
 pub(crate) struct AdapterMaps {
     pub nodes: HashMap<NodeId, Entity>,
     pub meshes: HashMap<MeshId, Handle<Mesh>>,
+    pub textures: HashMap<TextureId, Handle<Image>>,
     pub materials: HashMap<NodeId, Handle<StandardMaterial>>,
     pub camera_nodes: HashMap<NodeId, Entity>,
     pub active_camera: Option<NodeId>,
@@ -128,6 +131,22 @@ pub(crate) fn game_update(world: &mut World) {
     with_ctx(world, |game, ctx| game.update(ctx));
 }
 
+/// Look up the image handle a material's texture id refers to.
+///
+/// An id with no registered texture warns rather than silently rendering
+/// untextured: "the atlas did not load" and "this material has no atlas" look
+/// identical on screen and take very different fixes.
+fn resolve_texture(world: &World, material: &MaterialDesc) -> Option<Handle<Image>> {
+    let id = material.base_color_texture?;
+    match world.resource::<AdapterMaps>().textures.get(&id) {
+        Some(handle) => Some(handle.clone()),
+        None => {
+            log::warn!("material references texture {id:?}, which was never registered");
+            None
+        }
+    }
+}
+
 pub(crate) fn apply_scene_commands(world: &mut World) {
     let commands: Vec<SceneCommand> = {
         let mut scene = world.resource_mut::<SceneRes>();
@@ -148,6 +167,22 @@ pub(crate) fn apply_scene_commands(world: &mut World) {
                     .meshes
                     .insert(id, handle);
             }
+            SceneCommand::AddTexture { id, png, sampling } => {
+                match decode_texture(&png, sampling) {
+                    Ok(image) => {
+                        let handle = world.resource_mut::<Assets<Image>>().add(image);
+                        world
+                            .resource_mut::<AdapterMaps>()
+                            .textures
+                            .insert(id, handle);
+                    }
+                    // A texture that will not decode must be loud. Silently
+                    // leaving it unregistered gives an untextured -- not
+                    // obviously broken -- surface, which is far harder to
+                    // trace back than a line in the log.
+                    Err(e) => log::error!("texture {id:?} failed to decode: {e}"),
+                }
+            }
             SceneCommand::Spawn {
                 id,
                 parent,
@@ -163,9 +198,12 @@ pub(crate) fn apply_scene_commands(world: &mut World) {
                                 continue;
                             }
                         };
+                        let texture = resolve_texture(world, &material);
+                        let mut std_material = to_std_material(&material);
+                        std_material.base_color_texture = texture;
                         let mat_handle = world
                             .resource_mut::<Assets<StandardMaterial>>()
-                            .add(to_std_material(&material));
+                            .add(std_material);
                         let entity = world
                             .spawn((
                                 Mesh3d(mesh_handle),
@@ -287,9 +325,14 @@ pub(crate) fn apply_scene_commands(world: &mut World) {
             SceneCommand::SetMaterial { id, material } => {
                 let handle = world.resource::<AdapterMaps>().materials.get(&id).cloned();
                 if let Some(handle) = handle {
+                    // Resolve BEFORE borrowing the asset store, and apply the
+                    // same binding as the spawn path -- otherwise changing a
+                    // material at runtime silently drops its texture.
+                    let texture = resolve_texture(world, &material);
                     let mut materials = world.resource_mut::<Assets<StandardMaterial>>();
                     if let Some(mat) = materials.get_mut(&handle) {
                         *mat = to_std_material(&material);
+                        mat.base_color_texture = texture;
                     }
                 }
             }

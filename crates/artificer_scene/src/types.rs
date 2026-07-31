@@ -10,6 +10,22 @@ pub struct NodeId(pub u64);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct MeshId(pub u64);
 
+/// Registered texture id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, PartialOrd, Ord)]
+pub struct TextureId(pub u64);
+
+/// How a texture is sampled.
+///
+/// `Nearest` is the default because the packs this engine is built to consume
+/// are atlas-based: neighbouring swatches sit pixels apart on one page, and
+/// bilinear filtering bleeds one into the next along every UV seam.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum TextureSampling {
+    #[default]
+    Nearest,
+    Linear,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct TransformDesc {
     pub translation: Vec3,
@@ -113,6 +129,14 @@ pub enum AlphaModeDesc {
 // prevent everywhere else in the import vocabulary.
 #[serde(default, deny_unknown_fields)]
 pub struct MaterialDesc {
+    /// Albedo texture. Multiplies `base_color`, so an untextured material and
+    /// a white-tinted textured one are the same expression.
+    ///
+    /// The pack stores this as a string id and the loader resolves it to a
+    /// [`TextureId`] at load, which is why baking never has to invent handle
+    /// numbers that would differ between runs.
+    pub base_color_texture: Option<TextureId>,
+    pub sampling: TextureSampling,
     pub base_color: [f32; 4],
     pub metallic: f32,
     pub roughness: f32,
@@ -125,6 +149,8 @@ pub struct MaterialDesc {
 impl Default for MaterialDesc {
     fn default() -> Self {
         Self {
+            base_color_texture: None,
+            sampling: TextureSampling::Nearest,
             base_color: [0.8, 0.8, 0.8, 1.0],
             metallic: 0.0,
             roughness: 0.6,
@@ -251,6 +277,14 @@ pub enum SceneCommand {
     AddMesh {
         id: MeshId,
         data: MeshData,
+    },
+    /// Upload an encoded image (PNG). Kept encoded rather than decoded to raw
+    /// pixels so the bytes travel as they came out of the bake, and the
+    /// renderer's own decoder does the work.
+    AddTexture {
+        id: TextureId,
+        png: Vec<u8>,
+        sampling: TextureSampling,
     },
     Spawn {
         id: NodeId,

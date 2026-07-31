@@ -20,6 +20,7 @@ use std::collections::HashMap;
 pub struct SceneGraph {
     next_node: u64,
     next_mesh: u64,
+    next_texture: u64,
     nodes: HashMap<NodeId, NodeState>,
     commands: Vec<SceneCommand>,
 }
@@ -50,6 +51,18 @@ impl SceneGraph {
         self.next_mesh += 1;
         let id = MeshId(self.next_mesh);
         self.commands.push(SceneCommand::AddMesh { id, data });
+        id
+    }
+
+    /// Register an encoded image (PNG) and get a handle for materials.
+    ///
+    /// Ids are allocated here rather than baked, so a pack never has to carry
+    /// handle numbers that would differ between runs.
+    pub fn add_texture(&mut self, png: Vec<u8>, sampling: TextureSampling) -> TextureId {
+        self.next_texture += 1;
+        let id = TextureId(self.next_texture);
+        self.commands
+            .push(SceneCommand::AddTexture { id, png, sampling });
         id
     }
 
