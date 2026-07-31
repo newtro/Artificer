@@ -20,6 +20,7 @@
 pub mod convert;
 pub mod error;
 pub mod fbx;
+pub mod gltf;
 pub mod source;
 
 pub use error::ImportError;
@@ -57,10 +58,7 @@ pub fn read_source(
     match resolved {
         // ufbx reads FBX (binary and ASCII) and OBJ through one API.
         SourceFormat::Fbx | SourceFormat::Obj => fbx::read(&text, frame),
-        SourceFormat::Gltf => Err(ImportError::Read(
-            text,
-            "glTF support arrives in phase A3".into(),
-        )),
+        SourceFormat::Gltf => gltf::read(&text),
         SourceFormat::Auto => unreachable!("resolved above"),
     }
 }

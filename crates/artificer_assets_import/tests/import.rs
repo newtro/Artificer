@@ -842,3 +842,141 @@ fn an_explicit_left_handed_frame_also_comes_out_right_side_out() {
         agreement * 100.0
     );
 }
+
+// ----- glTF front-end (A3) -----
+
+#[test]
+fn reads_glb_at_metre_scale() {
+    // glTF fixes right-handed Y-up metres by specification, so this path has
+    // no unit or axis normalisation to do — which is exactly why it must land
+    // on the same numbers as the FBX of the same model.
+    let pack = import_manifest(
+        &fixtures(),
+        &manifest_for(
+            "craft_racer.glb",
+            SourceFormat::Auto,
+            base_import("a", "src"),
+        ),
+    )
+    .expect("glb should import");
+    assert_close(
+        extents(&pack, "a"),
+        [1.200, 0.750, 2.026],
+        "craft_racer.glb",
+    );
+    assert_eq!(pack.find("a").unwrap().mesh.triangle_count(), 280);
+}
+
+#[test]
+fn reads_binary_glb_from_the_other_kit() {
+    let pack = import_manifest(
+        &fixtures(),
+        &manifest_for("corridor.glb", SourceFormat::Auto, base_import("a", "src")),
+    )
+    .expect("glb should import");
+    assert_close(extents(&pack, "a"), [4.000, 4.250, 4.000], "corridor.glb");
+    assert_eq!(pack.find("a").unwrap().mesh.triangle_count(), 860);
+}
+
+#[test]
+fn the_two_front_ends_agree_on_the_same_model() {
+    // The cross-check the multi-format fixtures exist for: two completely
+    // separate readers, one shared post-processor, same geometry out. If a
+    // reader mangles winding, scale or node transforms, this catches it.
+    for (fbx_file, glb_file) in [
+        ("craft_racer.fbx", "craft_racer.glb"),
+        ("corridor.fbx", "corridor.glb"),
+    ] {
+        let via_fbx = import_manifest(
+            &fixtures(),
+            &manifest_for(fbx_file, SourceFormat::Auto, base_import("a", "src")),
+        )
+        .unwrap();
+        let via_gltf = import_manifest(
+            &fixtures(),
+            &manifest_for(glb_file, SourceFormat::Auto, base_import("a", "src")),
+        )
+        .unwrap();
+
+        let a = &via_fbx.find("a").unwrap().mesh;
+        let b = &via_gltf.find("a").unwrap().mesh;
+        assert_eq!(
+            a.triangle_count(),
+            b.triangle_count(),
+            "{fbx_file} vs {glb_file}"
+        );
+        assert_close(
+            a.bounds().unwrap().extents().to_array(),
+            b.bounds().unwrap().extents().to_array(),
+            &format!("{fbx_file} vs {glb_file}"),
+        );
+        // And both right-side-out, so neither reader is silently mirroring.
+        assert!(winding_agreement(a) > 0.95, "{fbx_file}");
+        assert!(winding_agreement(b) > 0.95, "{glb_file}");
+    }
+}
+
+#[test]
+fn glb_node_transforms_are_applied() {
+    // Reading doc.meshes() directly would drop node placement and pile every
+    // part at the origin. A model whose parts sit away from the origin proves
+    // the hierarchy walk works: corridor is 4 m tall and does NOT straddle
+    // y=0 the way an untransformed mesh would.
+    let pack = import_manifest(
+        &fixtures(),
+        &manifest_for("corridor.glb", SourceFormat::Auto, base_import("a", "src")),
+    )
+    .unwrap();
+    let fbx = import_manifest(
+        &fixtures(),
+        &manifest_for("corridor.fbx", SourceFormat::Auto, base_import("a", "src")),
+    )
+    .unwrap();
+    let glb_bounds = pack.find("a").unwrap().mesh.bounds().unwrap();
+    let fbx_bounds = fbx.find("a").unwrap().mesh.bounds().unwrap();
+    // Same placement, not just the same size.
+    assert!(
+        (glb_bounds.min - fbx_bounds.min).length() < 0.01
+            && (glb_bounds.max - fbx_bounds.max).length() < 0.01,
+        "glb {glb_bounds:?} vs fbx {fbx_bounds:?} — node transforms lost?"
+    );
+}
+
+#[test]
+fn an_imported_glb_pack_passes_the_contract_and_bakes() {
+    let pack = import_manifest(
+        &fixtures(),
+        &manifest_for(
+            "craft_racer.glb",
+            SourceFormat::Auto,
+            base_import("a", "src"),
+        ),
+    )
+    .unwrap();
+    assert_eq!(pack.validate(), vec![]);
+    assert!(pack.to_postcard_current().is_ok());
+}
+
+#[test]
+fn a_corrupt_model_file_is_an_error_not_a_panic() {
+    // A bake runs unattended over a library; a malformed file must report,
+    // not abort the process.
+    let dir = std::env::temp_dir().join("artificer_import_corrupt");
+    std::fs::create_dir_all(&dir).unwrap();
+    for (name, bytes) in [
+        ("broken.glb", &b"glTF not really"[..]),
+        ("broken.fbx", &b"Kaydara FBX Binary  \x00 truncated"[..]),
+        ("broken.obj", &b"v not-a-number\nf 1 2 3\n"[..]),
+    ] {
+        std::fs::write(dir.join(name), bytes).unwrap();
+        let result = import_manifest(
+            &dir,
+            &manifest_for(name, SourceFormat::Auto, base_import("a", "src")),
+        );
+        assert!(result.is_err(), "{name} should fail cleanly");
+        assert!(
+            !result.unwrap_err().to_string().is_empty(),
+            "{name} error should say something"
+        );
+    }
+}

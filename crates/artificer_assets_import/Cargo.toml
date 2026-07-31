@@ -19,3 +19,5 @@ log = { workspace = true }
 # Pure-Rust binding to the ufbx single-file C reader. Reads binary AND ASCII
 # FBX, and OBJ, which is why the OBJ front-end costs nothing extra.
 ufbx = "0.11.2"
+# glTF/GLB. Default features give the import helpers and buffer/image loading.
+gltf = "1.4.1"
