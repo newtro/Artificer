@@ -1,15 +1,15 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/aether_core",
-    "crates/aether_scene",
-    "crates/aether_physics",
-    "crates/aether_input",
-    "crates/aether_assets",
-    "crates/aether_render",
-    "crates/aether_net",
-    "crates/aether_agent",
-    "crates/aether_testkit",
+    "crates/artificer_core",
+    "crates/artificer_scene",
+    "crates/artificer_physics",
+    "crates/artificer_input",
+    "crates/artificer_assets",
+    "crates/artificer_render",
+    "crates/artificer_net",
+    "crates/artificer_agent",
+    "crates/artificer_testkit",
     "samples/minimal",
 ]
 
@@ -20,15 +20,15 @@ license = "UNLICENSED"
 publish = false
 
 [workspace.dependencies]
-aether_core = { path = "crates/aether_core" }
-aether_scene = { path = "crates/aether_scene" }
-aether_physics = { path = "crates/aether_physics" }
-aether_input = { path = "crates/aether_input" }
-aether_assets = { path = "crates/aether_assets" }
-aether_render = { path = "crates/aether_render" }
-aether_net = { path = "crates/aether_net" }
-aether_agent = { path = "crates/aether_agent" }
-aether_testkit = { path = "crates/aether_testkit" }
+artificer_core = { path = "crates/artificer_core" }
+artificer_scene = { path = "crates/artificer_scene" }
+artificer_physics = { path = "crates/artificer_physics" }
+artificer_input = { path = "crates/artificer_input" }
+artificer_assets = { path = "crates/artificer_assets" }
+artificer_render = { path = "crates/artificer_render" }
+artificer_net = { path = "crates/artificer_net" }
+artificer_agent = { path = "crates/artificer_agent" }
+artificer_testkit = { path = "crates/artificer_testkit" }
 
 glam = { version = "0.29", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }

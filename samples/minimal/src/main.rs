@@ -4,18 +4,18 @@
 //! Windowed: an emissive cube orbits a point light; press Escape to exit.
 //! Headless: a deterministic physics drift scenario with assertions.
 
-use aether_assets::procmesh;
-use aether_input::Key;
-use aether_physics::{DynamicBodyParams, PhysicsWorld};
-use aether_render::{run_app, EngineCtx, GameClient, RenderConfig};
-use aether_scene::{CameraDesc, EnvironmentDesc, LightDesc, MaterialDesc, NodeId, TransformDesc};
-use aether_testkit::{run_scenario, Scenario, ScenarioCtx};
+use artificer_assets::procmesh;
+use artificer_input::Key;
+use artificer_physics::{DynamicBodyParams, PhysicsWorld};
+use artificer_render::{run_app, EngineCtx, GameClient, RenderConfig};
+use artificer_scene::{CameraDesc, EnvironmentDesc, LightDesc, MaterialDesc, NodeId, TransformDesc};
+use artificer_testkit::{run_scenario, Scenario, ScenarioCtx};
 use glam::{Quat, Vec3};
 
 /// A body given one impulse drifts predictably in zero-g.
 struct DriftScenario {
     world: PhysicsWorld,
-    body: Option<aether_physics::BodyHandle>,
+    body: Option<artificer_physics::BodyHandle>,
 }
 
 impl Scenario for DriftScenario {
@@ -139,7 +139,7 @@ fn main() {
     } else {
         run_app(
             RenderConfig {
-                title: "aether minimal sample".to_string(),
+                title: "artificer minimal sample".to_string(),
                 ..Default::default()
             },
             MinimalGame {

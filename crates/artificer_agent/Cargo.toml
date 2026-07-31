@@ -1,0 +1,10 @@
+[package]
+name = "artificer_agent"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+artificer_net = { workspace = true }
+log = { workspace = true }

@@ -5,7 +5,7 @@ Status: Accepted
 
 ## Context
 
-The engine exposes a renderer-neutral scene API (`aether_scene`) that covers
+The engine exposes a renderer-neutral scene API (`artificer_scene`) that covers
 common presentation: meshes, PBR materials, lights, cameras, transforms.
 AAA-grade game-specific rendering (volumetric nebula shaders, bloom-driven
 star fields, animated route lines on the star map) requires custom WGSL
@@ -19,17 +19,17 @@ game repository — that code is presentation-layer, not domain data.
 
 ## Decision
 
-`aether_render` re-exports Bevy under `aether_render::bevy` as a sanctioned,
+`artificer_render` re-exports Bevy under `artificer_render::bevy` as a sanctioned,
 documented extension surface. Game *client* crates may register Bevy plugins,
 custom `Material` implementations, and UI through it.
 
 Constraints that keep the boundary honest:
 
-1. Only client (presentation) crates may import `aether_render`. Domain,
+1. Only client (presentation) crates may import `artificer_render`. Domain,
    protocol, simulation, server, and AI crates must not (enforced by
    dependency direction; checked in review).
 2. Everything the server or headless simulation needs must flow through
-   Bevy-free crates (`aether_core`, `aether_physics`, `aether_scene` types).
+   Bevy-free crates (`artificer_core`, `artificer_physics`, `artificer_scene` types).
 3. If a second game needs the same extension pattern, it uses the same
    surface — nothing TWFI-specific enters the engine.
 
@@ -40,7 +40,7 @@ the *calling* crate's manifest, so game client crates additionally declare a
 direct `bevy` dependency pinned to the exact engine version with
 `default-features = false` and no extra features (cargo unifies it with the
 engine's build — zero additional compilation). The sanctioned surface for
-everything else remains `aether_render::bevy`; the direct dependency exists
+everything else remains `artificer_render::bevy`; the direct dependency exists
 only so derives compile, and must never widen the feature set.
 
 ## Consequences

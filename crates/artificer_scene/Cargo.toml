@@ -1,0 +1,10 @@
+[package]
+name = "artificer_scene"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+glam = { workspace = true }
+serde = { workspace = true }

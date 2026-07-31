@@ -68,98 +68,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
-name = "aether_agent"
-version = "0.1.0"
-dependencies = [
- "aether_net",
- "log",
-]
-
-[[package]]
-name = "aether_assets"
-version = "0.1.0"
-dependencies = [
- "aether_scene",
- "glam 0.29.3",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "aether_core"
-version = "0.1.0"
-dependencies = [
- "glam 0.29.3",
- "log",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "aether_input"
-version = "0.1.0"
-dependencies = [
- "glam 0.29.3",
- "serde",
-]
-
-[[package]]
-name = "aether_net"
-version = "0.1.0"
-dependencies = [
- "aether_core",
- "futures-util",
- "js-sys",
- "log",
- "postcard",
- "serde",
- "tokio",
- "tokio-tungstenite",
- "tungstenite",
- "wasm-bindgen",
- "web-sys",
-]
-
-[[package]]
-name = "aether_physics"
-version = "0.1.0"
-dependencies = [
- "glam 0.29.3",
- "log",
- "rapier3d",
-]
-
-[[package]]
-name = "aether_render"
-version = "0.1.0"
-dependencies = [
- "aether_core",
- "aether_input",
- "aether_scene",
- "bevy",
- "glam 0.29.3",
- "log",
-]
-
-[[package]]
-name = "aether_scene"
-version = "0.1.0"
-dependencies = [
- "glam 0.29.3",
- "serde",
-]
-
-[[package]]
-name = "aether_testkit"
-version = "0.1.0"
-dependencies = [
- "aether_core",
- "log",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "aho-corasick"
 version = "1.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -234,6 +142,98 @@ name = "arrayvec"
 version = "0.7.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d3fb67a6e08acf24fdeccbac2cb6ac4305825bd1f117462e0e6f2f193345ad56"
+
+[[package]]
+name = "artificer_agent"
+version = "0.1.0"
+dependencies = [
+ "artificer_net",
+ "log",
+]
+
+[[package]]
+name = "artificer_assets"
+version = "0.1.0"
+dependencies = [
+ "artificer_scene",
+ "glam 0.29.3",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "artificer_core"
+version = "0.1.0"
+dependencies = [
+ "glam 0.29.3",
+ "log",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "artificer_input"
+version = "0.1.0"
+dependencies = [
+ "glam 0.29.3",
+ "serde",
+]
+
+[[package]]
+name = "artificer_net"
+version = "0.1.0"
+dependencies = [
+ "artificer_core",
+ "futures-util",
+ "js-sys",
+ "log",
+ "postcard",
+ "serde",
+ "tokio",
+ "tokio-tungstenite",
+ "tungstenite",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
+name = "artificer_physics"
+version = "0.1.0"
+dependencies = [
+ "glam 0.29.3",
+ "log",
+ "rapier3d",
+]
+
+[[package]]
+name = "artificer_render"
+version = "0.1.0"
+dependencies = [
+ "artificer_core",
+ "artificer_input",
+ "artificer_scene",
+ "bevy",
+ "glam 0.29.3",
+ "log",
+]
+
+[[package]]
+name = "artificer_scene"
+version = "0.1.0"
+dependencies = [
+ "glam 0.29.3",
+ "serde",
+]
+
+[[package]]
+name = "artificer_testkit"
+version = "0.1.0"
+dependencies = [
+ "artificer_core",
+ "log",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "ash"
@@ -2703,13 +2703,13 @@ dependencies = [
 name = "minimal"
 version = "0.1.0"
 dependencies = [
- "aether_assets",
- "aether_core",
- "aether_input",
- "aether_physics",
- "aether_render",
- "aether_scene",
- "aether_testkit",
+ "artificer_assets",
+ "artificer_core",
+ "artificer_input",
+ "artificer_physics",
+ "artificer_render",
+ "artificer_scene",
+ "artificer_testkit",
  "glam 0.29.3",
 ]
 
