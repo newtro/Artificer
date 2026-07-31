@@ -350,7 +350,10 @@ pub(crate) fn apply_cursor_grab(
     // off the window mid-turn, which reads as stuttering. Steering uses raw
     // motion deltas, so `Confined` is equally good where it is the supported
     // mode.
-    let want_mode = match (grab.0, cfg!(any(target_os = "macos", target_family = "wasm"))) {
+    let want_mode = match (
+        grab.0,
+        cfg!(any(target_os = "macos", target_family = "wasm")),
+    ) {
         (false, _) => CursorGrabMode::None,
         (true, true) => CursorGrabMode::Locked,
         (true, false) => CursorGrabMode::Confined,

@@ -8,7 +8,9 @@ use artificer_assets::procmesh;
 use artificer_input::Key;
 use artificer_physics::{DynamicBodyParams, PhysicsWorld};
 use artificer_render::{run_app, EngineCtx, GameClient, RenderConfig};
-use artificer_scene::{CameraDesc, EnvironmentDesc, LightDesc, MaterialDesc, NodeId, TransformDesc};
+use artificer_scene::{
+    CameraDesc, EnvironmentDesc, LightDesc, MaterialDesc, NodeId, TransformDesc,
+};
 use artificer_testkit::{run_scenario, Scenario, ScenarioCtx};
 use glam::{Quat, Vec3};
 
