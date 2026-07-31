@@ -59,13 +59,25 @@ pub struct EngineCtx<'a> {
     /// World-space labels to render this frame (cleared each frame).
     pub labels: &'a mut WorldLabels,
     pub(crate) exit_requested: bool,
+    pub(crate) cursor_grab_request: Option<bool>,
 }
 
 impl EngineCtx<'_> {
     pub fn request_exit(&mut self) {
         self.exit_requested = true;
     }
+
+    /// Lock + hide the OS cursor (mouse-look flight) or release it (menus,
+    /// map screens). Idempotent; the platform window is only touched when
+    /// the requested state actually changes.
+    pub fn set_cursor_grab(&mut self, grab: bool) {
+        self.cursor_grab_request = Some(grab);
+    }
 }
+
+/// Desired cursor grab state, applied to the primary window on change.
+#[derive(Resource, Default, PartialEq)]
+pub(crate) struct CursorGrab(pub bool);
 
 /// The game's hook into the engine frame loop. Runs on the main thread as a
 /// non-send resource, so games may hold platform handles (sockets, JS
@@ -139,6 +151,7 @@ pub fn run_app(config: RenderConfig, game: impl GameClient) {
         .insert_resource(InputRes(InputState::new()))
         .insert_resource(HudBoard::default())
         .insert_resource(FrameInfo::default())
+        .insert_resource(CursorGrab::default())
         .insert_non_send_resource(GameRes(Box::new(game)))
         .insert_resource(ClearColor(Color::BLACK))
         .insert_resource(systems::AdapterMaps::default())
@@ -150,6 +163,7 @@ pub fn run_app(config: RenderConfig, game: impl GameClient) {
                 systems::game_update,
                 systems::apply_scene_commands,
                 systems::sync_active_camera,
+                systems::apply_cursor_grab,
             )
                 .chain(),
         );

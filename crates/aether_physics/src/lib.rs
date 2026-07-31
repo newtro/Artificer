@@ -233,6 +233,31 @@ impl PhysicsWorld {
             .insert_with_parent(c, body.0, &mut self.bodies);
     }
 
+    /// Turn every collider on a body on or off without destroying it, so a
+    /// body can be made to pass through the world for a while and come back
+    /// solid with the same handle, mass and shape. Games use this for phased
+    /// or in-transit states.
+    pub fn set_body_collisions_enabled(&mut self, body: BodyHandle, enabled: bool) {
+        let Some(rb) = self.bodies.get(body.0) else {
+            return;
+        };
+        let handles: Vec<_> = rb.colliders().to_vec();
+        for handle in handles {
+            if let Some(collider) = self.colliders.get_mut(handle) {
+                collider.set_enabled(enabled);
+            }
+        }
+    }
+
+    /// Whether a body currently collides with anything.
+    pub fn body_collisions_enabled(&self, body: BodyHandle) -> bool {
+        self.bodies
+            .get(body.0)
+            .and_then(|rb| rb.colliders().first())
+            .and_then(|h| self.colliders.get(*h))
+            .is_some_and(|c| c.is_enabled())
+    }
+
     // ----- state access -----
 
     pub fn pose(&self, handle: BodyHandle) -> Option<(Vec3, Quat)> {
@@ -516,6 +541,34 @@ mod tests {
         assert_eq!(hits[0].1, 11);
         let all = world.bodies_within(Vec3::ZERO, 10_000.0);
         assert_eq!(all.len(), 2);
+    }
+
+    #[test]
+    fn disabled_colliders_let_a_body_pass_through_and_come_back_solid() {
+        let mut world = PhysicsWorld::new_zero_gravity();
+        let wall = world.add_fixed(Vec3::new(20.0, 0.0, 0.0), Quat::IDENTITY);
+        world.attach_cuboid(wall, Vec3::new(2.0, 20.0, 20.0), 1.0);
+        let ship = world.add_dynamic(Vec3::ZERO, Quat::IDENTITY, DynamicBodyParams::default());
+        world.attach_ball(ship, 1.0, 1.0);
+        assert!(world.body_collisions_enabled(ship));
+
+        // Phased: it sails straight through the wall.
+        world.set_body_collisions_enabled(ship, false);
+        assert!(!world.body_collisions_enabled(ship));
+        world.set_velocity(ship, Vec3::X * 40.0, Vec3::ZERO);
+        for _ in 0..60 {
+            world.step(DT);
+        }
+        let (through, _) = world.pose(ship).unwrap();
+        assert!(
+            through.x > 25.0,
+            "phased body should pass the wall, stopped at {}",
+            through.x
+        );
+
+        // Solid again with the same handle.
+        world.set_body_collisions_enabled(ship, true);
+        assert!(world.body_collisions_enabled(ship));
     }
 
     #[test]

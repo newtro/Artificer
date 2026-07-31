@@ -14,7 +14,7 @@ boundary contract and `docs/adr/` for architecture decisions.
 | `aether_assets` | Procedural mesh builders, asset manifest + validation | no |
 | `aether_net` | Versioned wire codec, client transports (native/wasm/loopback/latency-lab), WebSocket server, prediction primitives | no |
 | `aether_agent` | Headless agent SDK: byte-oriented `HeadlessClient` + fixed-rate `AgentLoop` — AI actors, load bots, soak harnesses | no |
-| `aether_render` | Bevy adapter: runs the app, syncs scene, input, cameras; sanctioned Bevy extension surface | yes |
+| `aether_render` | Bevy adapter: runs the app, syncs scene, input, cameras, cursor grab (mouse-look); sanctioned Bevy extension surface | yes |
 | `aether_testkit` | Scenario runner, deterministic assertions, event replay (`replay::EventLog` + fold — games prove their ledgers reproduce end state) | no |
 | `samples/minimal` | Engine generality proof — builds with public APIs only | yes |
 

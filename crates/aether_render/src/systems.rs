@@ -99,10 +99,20 @@ fn with_ctx(world: &mut World, f: impl FnOnce(&mut dyn crate::GameClient, &mut E
                     hud: &mut hud,
                     labels: &mut labels,
                     exit_requested: false,
+                    cursor_grab_request: None,
                 };
                 f(game.0.as_mut(), &mut ctx);
-                if ctx.exit_requested {
+                let exit_requested = ctx.exit_requested;
+                let cursor_grab_request = ctx.cursor_grab_request;
+                if exit_requested {
                     world.send_event(bevy::app::AppExit::Success);
+                }
+                if let Some(grab) = cursor_grab_request {
+                    // Read first: taking it mutably would flag the resource
+                    // as changed every frame even when nothing moved.
+                    if world.resource::<crate::CursorGrab>().0 != grab {
+                        world.resource_mut::<crate::CursorGrab>().0 = grab;
+                    }
                 }
             });
         });
@@ -320,6 +330,39 @@ pub(crate) fn apply_scene_commands(world: &mut World) {
                 });
             }
         }
+    }
+}
+
+pub(crate) fn apply_cursor_grab(
+    grab: Res<crate::CursorGrab>,
+    mut windows: Query<&mut Window, With<PrimaryWindow>>,
+) {
+    if !grab.is_changed() {
+        return;
+    }
+    let Ok(mut window) = windows.single_mut() else {
+        return;
+    };
+    use bevy::window::CursorGrabMode;
+    // Platforms disagree about which grab they implement: winit supports
+    // `Locked` on macOS/web and `Confined` on Windows/X11. Asking for the
+    // unsupported one fails silently and leaves the pointer free to wander
+    // off the window mid-turn, which reads as stuttering. Steering uses raw
+    // motion deltas, so `Confined` is equally good where it is the supported
+    // mode.
+    let want_mode = match (grab.0, cfg!(any(target_os = "macos", target_family = "wasm"))) {
+        (false, _) => CursorGrabMode::None,
+        (true, true) => CursorGrabMode::Locked,
+        (true, false) => CursorGrabMode::Confined,
+    };
+    // Compare before assigning: `Mut` marks the window changed on any
+    // mutable deref, and a window marked dirty every frame makes the winit
+    // adapter re-diff it every frame.
+    if window.cursor_options.grab_mode != want_mode {
+        window.cursor_options.grab_mode = want_mode;
+    }
+    if window.cursor_options.visible == grab.0 {
+        window.cursor_options.visible = !grab.0;
     }
 }
 
