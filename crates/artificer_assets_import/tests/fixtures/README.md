@@ -14,13 +14,23 @@ redistribute.
 | `craft_racer.fbx` | Space Kit | **ASCII FBX 7.3.0** | The ASCII parser path |
 | `craft_racer.obj` | Space Kit | OBJ | Same model, second format — cross-check |
 | `corridor.fbx` | Modular Space Kit | **binary FBX 7700** | The binary parser path |
+| `craft_racer.glb` | Space Kit | GLB | Same model again — the FBX/glTF cross-check |
+| `corridor.glb` | Modular Space Kit | GLB | Second cross-check pair |
 | `rocket_baseA.fbx`, `rocket_finsA.fbx` | Space Kit | ASCII FBX | Pieces of a modular kit, for the assembly sample |
+| `colormap.png` | Modular Space Kit | PNG, 512² | The atlas page, for texture baking and downscaling |
 
 Both FBX flavours are represented deliberately. Real production art for this
 project is binary FBX 7400, so a suite that only ever parsed hand-authored
 ASCII would prove very little about the reader that matters.
 
-What these fixtures do NOT cover: they are authored Y-up in metres, so they
-exercise the parser but not the axis-correction path. Conversion is covered by
-synthetic geometry in the unit tests, where the input frame can be stated
-exactly and the expected output computed rather than eyeballed.
+Having the SAME model in two formats is the point of the `.glb` pair, not
+redundancy: two independent readers producing the same geometry is what caught
+the FBX reader dropping node transforms, once the comparison was strengthened
+from bounding-box SIZE (translation-invariant, so it saw nothing) to position.
+
+What these fixtures do NOT cover on their own: they are authored in metres, so
+correction maths is also checked against synthetic geometry in the unit tests,
+where the input frame can be stated exactly and the expected output computed
+rather than eyeballed. Both are needed — testing corrections only on synthetic
+scenes, and file reading only on real files, is precisely the gap two blockers
+fell through.

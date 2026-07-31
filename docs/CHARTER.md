@@ -26,11 +26,9 @@ a sibling-path override; semantic versioning begins after MVP stabilization.
   (`artificer_assets_import`). NATIVE ONLY: `artificer_assets` compiles into
   the WASM client and must never depend on this crate, which is what keeps a
   model parser out of a browser bundle. Both check scripts assert the edge
-  does not exist. See ADR-0003.
-
-**The engine ships the pipeline; games ship the art.** No game art lives in
-this repository. Test fixtures are CC0 (Kenney) precisely so a public repo can
-carry them; licensed art belongs in the consuming game's own repo.
+  does not exist. See ADR-0003. The engine ships the PIPELINE and games ship
+  the ART: no game art lives in this repository, and the test fixtures are CC0
+  (Kenney) precisely so a public repo can carry them.
 - Browser, Windows, and headless platform adapters (`artificer_render` / headless runners)
 - Agent client SDK (`artificer_agent`, added at M4)
 - Scenario compiler, inspection, testkit (`artificer_testkit`)

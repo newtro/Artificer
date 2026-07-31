@@ -18,6 +18,7 @@
 //! [`artificer_assets::MeshImport`] documents.
 
 pub mod convert;
+pub mod dev;
 pub mod error;
 pub mod fbx;
 pub mod gltf;
@@ -27,7 +28,7 @@ pub mod texture;
 pub use error::ImportError;
 pub use source::{SourceMesh, SourcePart, SourceScene};
 
-use artificer_assets::{AssetPack, ImportManifest, MeshImport, SourceFormat};
+use artificer_assets::{AssetPack, ImportManifest, SourceFormat};
 use std::path::{Path, PathBuf};
 
 /// Read one source file, choosing a front-end by declared format or by
@@ -67,26 +68,6 @@ pub fn read_source(
 fn extension_of(path: &Path) -> Option<String> {
     path.extension()
         .map(|e| e.to_string_lossy().to_ascii_lowercase())
-}
-
-/// Import one mesh described by a manifest entry, into an existing pack.
-pub fn import_mesh(
-    root: &Path,
-    manifest: &ImportManifest,
-    import: &MeshImport,
-    pack: &mut AssetPack,
-) -> Result<(), ImportError> {
-    let source = manifest.source(&import.source).ok_or_else(|| {
-        ImportError::Manifest(vec![artificer_assets::ValidationIssue {
-            asset_id: import.id.clone(),
-            message: format!("references unknown import source '{}'", import.source),
-        }])
-    })?;
-    let path = resolve(root, &source.path);
-    let scene = read_source(&path, source.format, import.axis)?;
-    let asset = convert::convert(&scene, import, pack)?;
-    pack.assets.push(asset);
-    Ok(())
 }
 
 /// Import an entire manifest.

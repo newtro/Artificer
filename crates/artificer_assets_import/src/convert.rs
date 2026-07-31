@@ -104,8 +104,10 @@ fn select_and_merge(scene: &SourceScene, import: &MeshImport) -> Result<Merged, 
 
 /// Steps 1-4 of the correction order, as one matrix.
 fn correction_basis(import: &MeshImport) -> Result<Mat3, ImportError> {
-    // 1. Axis frame. `FromSource` means the reader already normalised using
-    //    the file's own metadata, so there is nothing left to do here.
+    // 1. Axis frame. The reader always normalises UNITS; under `FromSource`
+    //    it also converted axes using the file's own metadata, so there is
+    //    nothing left to do. An explicit frame means the reader deliberately
+    //    left the axes alone and the caller's basis applies here instead.
     let basis = match import.axis {
         AxisConvention::FromSource => Mat3::IDENTITY,
         explicit => explicit.to_engine_basis().ok_or_else(|| {
@@ -156,12 +158,15 @@ pub fn convert(
     // inverse-transpose is the rotation; for a mirror it is the mirror; a
     // uniform scale washes out under normalisation.) Skipping this is what
     // leaves mirrored parts lit inside-out.
-    let had_normals = mesh.normals.iter().any(|n| *n != [0.0, 0.0, 0.0]);
-    if had_normals {
-        for n in mesh.normals.iter_mut() {
-            let v = (basis * Vec3::from_array(*n)).normalize_or_zero();
-            *n = v.to_array();
-        }
+    // Which vertices arrived WITHOUT a normal, tracked per vertex rather than
+    // per mesh. A merge can mix sources: one mesh carrying normals used to
+    // suppress generation for every mesh that lacked them, shipping half an
+    // asset to the GPU with (0,0,0) normals -- which renders unlit black and
+    // passes validation, because zero is finite.
+    let missing_normals: Vec<bool> = mesh.normals.iter().map(|n| *n == [0.0, 0.0, 0.0]).collect();
+    for n in mesh.normals.iter_mut() {
+        let v = (basis * Vec3::from_array(*n)).normalize_or_zero();
+        *n = v.to_array();
     }
 
     // 5. Pivot, measured on the geometry as it now stands.
@@ -186,11 +191,19 @@ pub fn convert(
         }
     }
 
-    // 7. Generate normals when the source carried none. Pinned to
+    // 7. Generate normals for the vertices that arrived without them, and
+    // ONLY those: overwriting authored normals with generated ones would
+    // smooth every hard edge in flat-shaded art. Pinned to
     // recompute_normals (area-weighted smooth) because a different smoothing
     // rule silently changes the baked bytes.
-    if !had_normals {
-        mesh.recompute_normals();
+    if missing_normals.iter().any(|m| *m) {
+        let mut generated = mesh.clone();
+        generated.recompute_normals();
+        for (i, missing) in missing_normals.iter().enumerate() {
+            if *missing {
+                mesh.normals[i] = generated.normals[i];
+            }
+        }
     }
 
     // Weld identical vertices.

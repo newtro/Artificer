@@ -5,8 +5,8 @@
 //! API and no game code. That is the point: it is the generality test for the
 //! asset pipeline (plan §9.4), and it doubles as the worked example.
 //!
-//! The content is Kenney's CC0 rocket kit: a base, fins, a fuel section and a
-//! nose, authored as separate models and assembled by placing each one. This
+//! The content is Kenney's CC0 rocket kit -- a base and fins, authored as
+//! separate models and assembled by placing each one. This
 //! is the same shape as a ship built from hull plus fitted parts, which is
 //! what the pipeline exists to serve.
 //!
@@ -27,20 +27,16 @@ use std::path::{Path, PathBuf};
 struct Part {
     id: &'static str,
     file: &'static str,
-    /// Metres along Y, stacking the rocket.
-    height: f32,
 }
 
 const KIT: &[Part] = &[
     Part {
         id: "rocket.base",
         file: "rocket_baseA.fbx",
-        height: 0.0,
     },
     Part {
         id: "rocket.fins",
         file: "rocket_finsA.fbx",
-        height: 0.0,
     },
 ];
 
@@ -155,22 +151,23 @@ fn main() {
     let loaded = load_pack(&mut scene, &loaded_pack);
     let mut y = 0.0;
     for part in KIT {
-        let Some(mesh) = loaded.mesh(part.id) else {
+        // parts(), not mesh(): an asset carrying several materials becomes
+        // several drawable pieces, and a kit that grows a glass canopy should
+        // not need this loop rewritten.
+        let pieces = loaded.parts(part.id);
+        if pieces.is_empty() {
             eprintln!("{} did not make it into the pack", part.id);
             std::process::exit(1);
-        };
-        let material = loaded
-            .primary_material(&loaded_pack, part.id)
-            .unwrap_or_default();
-        scene.spawn_mesh(
-            mesh,
-            material,
-            artificer_scene::TransformDesc::from_translation(artificer_scene::glam::Vec3::new(
-                0.0,
-                y + part.height,
-                0.0,
-            )),
-        );
+        }
+        for piece in pieces {
+            scene.spawn_mesh(
+                piece.mesh,
+                piece.material,
+                artificer_scene::TransformDesc::from_translation(artificer_scene::glam::Vec3::new(
+                    0.0, y, 0.0,
+                )),
+            );
+        }
         y += 1.0;
     }
 

@@ -5,7 +5,7 @@
 //! already. The only reason to decode here is to honour `max_size`.
 
 use crate::error::ImportError;
-use artificer_assets::{AssetPack, SamplerMode, TextureBlob, TextureImport};
+use artificer_assets::{AssetPack, TextureBlob, TextureImport};
 use std::path::Path;
 
 /// Read, optionally downscale, and register one texture.
@@ -65,8 +65,3 @@ fn encode_png(image: &image::DynamicImage, path: &Path) -> Result<Vec<u8>, Impor
         .map_err(|e| ImportError::Read(path.to_string_lossy().to_string(), e.to_string()))?;
     Ok(out.into_inner())
 }
-
-/// Sampler default for an atlas page, stated once so callers do not each
-/// re-derive it: NEAREST, because neighbouring swatches sit pixels apart and
-/// bilinear filtering bleeds one into the next along every UV seam.
-pub const ATLAS_SAMPLER: SamplerMode = SamplerMode::Nearest;

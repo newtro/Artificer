@@ -20,7 +20,7 @@ Write-Host "== WASM safety: artificer_assets must not pull in the model parsers 
 # bundle is that this dependency edge does not exist. Assert it rather than
 # trusting it.
 $assetsTree = cargo tree -p artificer_assets 2>&1 | Out-String
-foreach ($forbidden in @("ufbx", "artificer_assets_import")) {
+foreach ($forbidden in @("ufbx", "gltf", "image", "artificer_assets_import")) {
     if ($assetsTree -match [regex]::Escape($forbidden)) {
         Write-Host "FAIL: artificer_assets depends on '$forbidden' - that reaches the WASM bundle"
         exit 1

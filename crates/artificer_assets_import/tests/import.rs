@@ -1093,3 +1093,90 @@ fn a_whole_kit_collapses_onto_one_atlas_material() {
     assert_eq!(pack.validate(), vec![]);
     println!("{}", pack.size_report().unwrap());
 }
+
+// ----- corrections THROUGH A REAL FILE -----
+//
+// Every other correction test builds a synthetic SourceScene and calls
+// convert() directly, which is precise but bypasses the reader entirely.
+// That is the exact shape of hole an earlier bug fell through: declaring an
+// explicit frame silently multiplied every coordinate by the file's unit
+// factor, because the reader stopped normalising units and nothing measured
+// the result end to end.
+
+#[test]
+fn a_declared_no_op_frame_does_not_change_the_geometry() {
+    // engine_native() says "this file is already in the engine's frame".
+    // Declaring it must be a NO-OP. It previously turned a 1.2 m model into a
+    // 12 m one, because the reader left the file's centimetres alone.
+    let from_source = import_manifest(
+        &fixtures(),
+        &manifest_for(
+            "craft_racer.fbx",
+            SourceFormat::Auto,
+            base_import("a", "src"),
+        ),
+    )
+    .unwrap();
+
+    let mut import = base_import("a", "src");
+    import.axis = AxisConvention::engine_native();
+    let explicit = import_manifest(
+        &fixtures(),
+        &manifest_for("craft_racer.fbx", SourceFormat::Auto, import),
+    )
+    .unwrap();
+
+    let a = from_source.find("a").unwrap().mesh.bounds().unwrap();
+    let b = explicit.find("a").unwrap().mesh.bounds().unwrap();
+    assert_close(
+        b.extents().to_array(),
+        a.extents().to_array(),
+        "a no-op frame must not resize anything",
+    );
+    assert_close(
+        b.extents().to_array(),
+        [1.200, 0.750, 2.026],
+        "still metric",
+    );
+}
+
+#[test]
+fn an_explicit_frame_still_normalises_units() {
+    // MeshImport documents that an explicit frame "overrides axes and
+    // handedness ONLY; unit normalization to metres always follows the file".
+    // Both fixtures declare non-metre units (0.1 and 0.01 metres per unit), so
+    // a failure here shows up as a 10x or 100x model.
+    for (file, expected) in [
+        ("craft_racer.fbx", [1.200, 0.750, 2.026]),
+        ("corridor.fbx", [4.000, 4.250, 4.000]),
+    ] {
+        let mut import = base_import("a", "src");
+        import.axis = AxisConvention::engine_native();
+        let pack =
+            import_manifest(&fixtures(), &manifest_for(file, SourceFormat::Auto, import)).unwrap();
+        assert_close(extents(&pack, "a"), expected, file);
+    }
+}
+
+#[test]
+fn node_transforms_reach_the_imported_geometry() {
+    // craft_racer's mesh node carries a translation of (-2, 0, -1.5). Reading
+    // mesh-local vertices drops it, which a bounding-box SIZE check cannot
+    // see -- only the position can.
+    let pack = import_manifest(
+        &fixtures(),
+        &manifest_for(
+            "craft_racer.fbx",
+            SourceFormat::Auto,
+            base_import("a", "src"),
+        ),
+    )
+    .unwrap();
+    let bounds = pack.find("a").unwrap().mesh.bounds().unwrap();
+    assert!(
+        bounds.min.x > 0.5,
+        "the node translation was dropped: min.x = {} (mesh-local would be \
+         about -0.6, placed should be about +1.4)",
+        bounds.min.x
+    );
+}

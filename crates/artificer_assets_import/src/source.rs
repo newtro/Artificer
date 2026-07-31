@@ -39,10 +39,6 @@ impl SourceMesh {
     pub fn triangle_count(&self) -> usize {
         self.parts.iter().map(|p| p.indices.len()).sum::<usize>() / 3
     }
-
-    pub fn index_count(&self) -> usize {
-        self.parts.iter().map(|p| p.indices.len()).sum()
-    }
 }
 
 /// Everything a source file contained, in file order.
