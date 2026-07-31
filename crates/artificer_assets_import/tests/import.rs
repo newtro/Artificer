@@ -1180,3 +1180,48 @@ fn node_transforms_reach_the_imported_geometry() {
         bounds.min.x
     );
 }
+
+#[test]
+fn a_z_up_file_is_corrected_by_a_declared_frame() {
+    // The end-to-end version of the axis test: a real file on disk, read by a
+    // real front-end, corrected by a frame declared in the manifest. Every
+    // downloaded fixture is Y-up metric and cannot exercise this at all.
+    //
+    // The wedge is 1 x 2 x 4 m in SOURCE axes (X, Y, Z). Blender is Z-up with
+    // -Y forward, so after correction the 4 m run must be vertical and the
+    // 2 m run must lie along Z.
+    let mut import = base_import("wedge", "src");
+    import.axis = AxisConvention::blender();
+    let pack = import_manifest(
+        &fixtures(),
+        &manifest_for("z_up_wedge.obj", SourceFormat::Auto, import),
+    )
+    .expect("z-up obj should import");
+    let e = extents(&pack, "wedge");
+    assert!(
+        (e[0] - 1.0).abs() < 1e-4 && (e[1] - 4.0).abs() < 1e-4 && (e[2] - 2.0).abs() < 1e-4,
+        "expected 1 x 4 x 2 m after Z-up correction, got {e:?}"
+    );
+}
+
+#[test]
+fn the_same_file_read_without_a_declared_frame_is_left_alone() {
+    // OBJ carries no axis metadata, so FromSource means "already engine
+    // native". The contrast with the test above is what proves the correction
+    // came from the DECLARATION rather than from something the reader does
+    // unconditionally.
+    let pack = import_manifest(
+        &fixtures(),
+        &manifest_for(
+            "z_up_wedge.obj",
+            SourceFormat::Auto,
+            base_import("wedge", "src"),
+        ),
+    )
+    .expect("obj should import");
+    let e = extents(&pack, "wedge");
+    assert!(
+        (e[0] - 1.0).abs() < 1e-4 && (e[1] - 2.0).abs() < 1e-4 && (e[2] - 4.0).abs() < 1e-4,
+        "expected the authored 1 x 2 x 4 m, got {e:?}"
+    );
+}

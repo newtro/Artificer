@@ -1,0 +1,23 @@
+# A deliberately ASYMMETRIC wedge, authored Z-UP (Blender convention).
+#
+# Hand-written, and ours, so it can live in a public repo. It exists because
+# every downloaded fixture is authored Y-up in metres and therefore cannot
+# exercise the axis-correction path at all -- the corrections were only ever
+# tested against synthetic in-memory scenes, which is one of the two gaps a
+# pair of silent geometry bugs fell through.
+#
+# OBJ carries no axis metadata, so a manifest declaring an explicit frame is
+# the only thing that says which way is up. That makes this the smallest
+# honest end-to-end test of "declare the frame once, in data".
+#
+# Shape: 4 m along source +Z (which must become engine +Y), 1 m along source
+# +X, 2 m along source +Y (which must become engine -Z). Every axis a
+# different length, so a wrong mapping cannot hide.
+v 0.0 0.0 0.0
+v 1.0 0.0 0.0
+v 0.0 2.0 0.0
+v 0.0 0.0 4.0
+f 1 3 2
+f 1 2 4
+f 1 4 3
+f 2 3 4
