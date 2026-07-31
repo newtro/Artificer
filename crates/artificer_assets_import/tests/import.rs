@@ -761,3 +761,84 @@ fn imports_real_production_art() {
         assert_eq!(pack.validate(), vec![], "{file} must satisfy the contract");
     }
 }
+
+/// Fraction of triangles whose winding agrees with the authored shading
+/// normals.
+///
+/// This is the invariant that catches inside-out geometry on OPEN meshes,
+/// where signed volume says nothing: the geometric normal implied by vertex
+/// order should point the same way as the normals the artist exported. If a
+/// conversion mirrored an axis without flipping winding, this collapses.
+fn winding_agreement(mesh: &artificer_scene::MeshData) -> f32 {
+    let mut agree = 0usize;
+    let mut total = 0usize;
+    for tri in mesh.indices.chunks_exact(3) {
+        let [i, j, k] = [tri[0] as usize, tri[1] as usize, tri[2] as usize];
+        let a = glam::Vec3::from_array(mesh.positions[i]);
+        let b = glam::Vec3::from_array(mesh.positions[j]);
+        let c = glam::Vec3::from_array(mesh.positions[k]);
+        let geometric = (b - a).cross(c - a);
+        if geometric.length_squared() < 1e-12 {
+            continue; // degenerate sliver, carries no orientation
+        }
+        let shading = glam::Vec3::from_array(mesh.normals[i])
+            + glam::Vec3::from_array(mesh.normals[j])
+            + glam::Vec3::from_array(mesh.normals[k]);
+        if shading.length_squared() < 1e-12 {
+            continue;
+        }
+        total += 1;
+        if geometric.dot(shading) > 0.0 {
+            agree += 1;
+        }
+    }
+    assert!(total > 0, "no orientable triangles to measure");
+    agree as f32 / total as f32
+}
+
+#[test]
+fn real_files_come_out_right_side_out() {
+    // The phase's most dangerous silent failure: under FromSource the READER
+    // performs the axis conversion, and if that conversion mirrors an axis
+    // without reversing winding, every face is backwards. Nothing else in the
+    // pipeline would notice -- the bounds are right, the triangle count is
+    // right, and it only shows up as a ship rendered inside-out.
+    //
+    // Measured against the authored normals rather than assumed.
+    for file in ["craft_racer.fbx", "corridor.fbx", "craft_racer.obj"] {
+        let pack = import_manifest(
+            &fixtures(),
+            &manifest_for(file, SourceFormat::Auto, base_import("a", "src")),
+        )
+        .unwrap_or_else(|e| panic!("{file}: {e}"));
+        let agreement = winding_agreement(&pack.find("a").unwrap().mesh);
+        assert!(
+            agreement > 0.95,
+            "{file}: only {:.0}% of faces wind the way their normals point — \
+             the axis conversion mirrored without flipping winding",
+            agreement * 100.0
+        );
+    }
+}
+
+#[test]
+fn an_explicit_left_handed_frame_also_comes_out_right_side_out() {
+    // The other half: when the manifest overrides the frame, the winding flip
+    // is OURS to apply, driven by changes_handedness(). Import the same file
+    // twice -- once trusting it, once declaring a left-handed frame -- and
+    // both must be right-side-out.
+    let mut import = base_import("a", "src");
+    import.axis = AxisConvention::unity();
+    let pack = import_manifest(
+        &fixtures(),
+        &manifest_for("craft_racer.fbx", SourceFormat::Auto, import),
+    )
+    .unwrap();
+    let agreement = winding_agreement(&pack.find("a").unwrap().mesh);
+    assert!(
+        agreement > 0.95,
+        "a declared left-handed source came out {:.0}% consistent — the \
+         mirror-induced winding flip was not applied",
+        agreement * 100.0
+    );
+}
