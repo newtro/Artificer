@@ -1,0 +1,21 @@
+[package]
+name = "artificer_assets_import"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# NATIVE-ONLY BY CONSTRUCTION. This crate holds the model parsers, and nothing
+# that ships to a browser may depend on it: `artificer_assets` (which the WASM
+# client does use) must never gain a dependency on this crate. That direction
+# is what keeps an FBX reader out of the bundle -- a feature flag would leave
+# it one accidental `default-features` away.
+
+[dependencies]
+artificer_assets = { workspace = true }
+artificer_scene = { workspace = true }
+glam = { workspace = true }
+log = { workspace = true }
+# Pure-Rust binding to the ufbx single-file C reader. Reads binary AND ASCII
+# FBX, and OBJ, which is why the OBJ front-end costs nothing extra.
+ufbx = "0.11.2"

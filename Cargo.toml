@@ -6,6 +6,7 @@ members = [
     "crates/artificer_physics",
     "crates/artificer_input",
     "crates/artificer_assets",
+    "crates/artificer_assets_import",
     "crates/artificer_render",
     "crates/artificer_net",
     "crates/artificer_agent",
@@ -25,6 +26,7 @@ artificer_scene = { path = "crates/artificer_scene" }
 artificer_physics = { path = "crates/artificer_physics" }
 artificer_input = { path = "crates/artificer_input" }
 artificer_assets = { path = "crates/artificer_assets" }
+artificer_assets_import = { path = "crates/artificer_assets_import" }
 artificer_render = { path = "crates/artificer_render" }
 artificer_net = { path = "crates/artificer_net" }
 artificer_agent = { path = "crates/artificer_agent" }
