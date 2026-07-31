@@ -10,3 +10,6 @@ artificer_scene = { workspace = true }
 glam = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+# Baked-pack encoding. Deliberately the only new dependency here: model
+# parsers live in artificer_assets_import so WASM builds cannot pull one in.
+postcard = { workspace = true }

@@ -35,7 +35,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rapier3d = "0.34"
 log = "0.4"
-postcard = { version = "1", features = ["use-std"] }
+# default-features off drops heapless/spin/lock_api from the graph of a
+# crate that compiles into the WASM client.
+postcard = { version = "1", default-features = false, features = ["use-std"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync", "io-util"] }
 tokio-tungstenite = "0.30"
 tungstenite = "0.30"

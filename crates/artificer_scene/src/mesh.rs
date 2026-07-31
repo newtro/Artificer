@@ -24,7 +24,13 @@ impl Aabb {
 
 /// Interleaved-agnostic triangle mesh: positions + normals + uvs + indices.
 /// The exchange format between `artificer_assets` builders and render adapters.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+///
+/// `PartialEq` is derived so mesh-carrying types (baked asset packs) can be
+/// compared structurally. Note it is exact float equality: comparing meshes
+/// that came from DIFFERENT importers is not meaningful, because formats
+/// split vertices at normal/UV seams differently — compare bounds and
+/// triangle counts for that.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct MeshData {
     pub positions: Vec<[f32; 3]>,
     pub normals: Vec<[f32; 3]>,
