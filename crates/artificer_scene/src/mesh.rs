@@ -62,7 +62,7 @@ impl MeshData {
     }
 
     /// Structural sanity: matching attribute counts, indices in range,
-    /// index count divisible by 3, finite positions.
+    /// index count divisible by 3, and finite positions, normals and UVs.
     pub fn validate(&self) -> Result<(), String> {
         let n = self.positions.len();
         if n == 0 {

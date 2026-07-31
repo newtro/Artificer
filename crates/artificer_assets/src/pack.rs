@@ -36,6 +36,31 @@ pub const PACK_FORMAT_VERSION: u16 = 1;
 /// The eight bytes every PNG starts with.
 const PNG_SIGNATURE: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
 
+/// Read a PNG's real width and height out of its IHDR chunk.
+///
+/// Checking the signature alone lets signature-prefixed garbage through, and
+/// the blob is handed straight to an image decoder at load — so a mislabelled
+/// texture would surface as a broken page in a browser rather than as a bake
+/// failure. IHDR is always the first chunk and always at a fixed offset, so
+/// this needs no image decoder of its own.
+fn png_dimensions(bytes: &[u8]) -> Result<(u32, u32), String> {
+    if !bytes.starts_with(&PNG_SIGNATURE) {
+        return Err("texture blob is not a PNG (bad signature)".into());
+    }
+    if bytes.len() < 24 {
+        return Err("texture blob is too short to hold a PNG header".into());
+    }
+    if &bytes[12..16] != b"IHDR" {
+        return Err("texture blob has no IHDR chunk where a PNG must have one".into());
+    }
+    let read = |o: usize| u32::from_be_bytes([bytes[o], bytes[o + 1], bytes[o + 2], bytes[o + 3]]);
+    let (w, h) = (read(16), read(20));
+    if w == 0 || h == 0 {
+        return Err(format!("PNG header declares a {w}x{h} image"));
+    }
+    Ok((w, h))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TextureBlob {
     pub id: String,
@@ -242,6 +267,12 @@ impl AssetPack {
         // which is exactly the determinism guarantee this method exists for.
         for asset in &mut self.assets {
             asset.submeshes.sort_by_key(|s| s.index_start);
+            // Semantically unordered record vectors, for the same reason:
+            // reversing either must not change the file. material_slots is
+            // documented as sorted, so this is also what makes that true.
+            asset.record.material_slots.sort();
+            asset.record.material_slots.dedup();
+            asset.record.sockets.sort_by(|a, b| a.name.cmp(&b.name));
         }
     }
 
@@ -424,6 +455,22 @@ impl AssetPack {
         issues
     }
 
+    /// Decode AND validate.
+    ///
+    /// [`AssetPack::from_postcard`] is deliberately decode-only: a pack is a
+    /// build artifact produced by a bake that already validated it, not
+    /// untrusted input, and re-validating every mesh on a browser cold start
+    /// costs load time for a check the bake already made. Use this when the
+    /// bytes came from somewhere less certain.
+    pub fn from_postcard_validated(bytes: &[u8]) -> Result<Self, PackError> {
+        let pack = Self::from_postcard(bytes)?;
+        let issues = pack.validate();
+        if !issues.is_empty() {
+            return Err(PackError::Invalid(issues));
+        }
+        Ok(pack)
+    }
+
     /// Run the §11.2 asset contract over every asset, plus pack-level
     /// referential integrity. Empty result = the whole pack passes.
     ///
@@ -478,13 +525,23 @@ impl AssetPack {
                     asset_id: texture.id.clone(),
                     message: "texture blob carries no bytes".into(),
                 });
-            } else if !texture.png.starts_with(&PNG_SIGNATURE) {
-                // The blob is handed straight to an image decoder at load, so
-                // "not actually a PNG" must fail at bake, not in the browser.
-                issues.push(ValidationIssue {
-                    asset_id: texture.id.clone(),
-                    message: "texture blob is not a PNG (bad signature)".into(),
-                });
+            } else {
+                match png_dimensions(&texture.png) {
+                    Err(problem) => issues.push(ValidationIssue {
+                        asset_id: texture.id.clone(),
+                        message: problem,
+                    }),
+                    Ok((w, h)) if (w, h) != (texture.width, texture.height) => {
+                        issues.push(ValidationIssue {
+                            asset_id: texture.id.clone(),
+                            message: format!(
+                                "texture declares {}x{} but the PNG is {w}x{h}",
+                                texture.width, texture.height
+                            ),
+                        })
+                    }
+                    Ok(_) => {}
+                }
             }
             if texture.width == 0 || texture.height == 0 {
                 issues.push(ValidationIssue {
@@ -518,7 +575,7 @@ impl AssetPack {
         let texture_bytes: usize = self.textures.iter().map(|t| t.png.len()).sum();
         // Encoding can fail (duplicate ids), and reporting "0 bytes baked" for
         // a pack that cannot bake is worse than saying so.
-        let encoded_bytes = self.to_postcard()?.len();
+        let encoded_bytes = self.to_postcard_current()?.len();
         Ok(PackSizeReport {
             assets: self.assets.len(),
             materials: self.materials.len(),
@@ -630,7 +687,7 @@ fn register(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::manifest::{AssetCategory, CollisionProxy, LodPolicy, PerfBudget};
+    use crate::manifest::{AssetCategory, CollisionProxy, LodPolicy, PerfBudget, Socket};
     use crate::procmesh;
 
     fn record(id: &str, mesh: &MeshData) -> AssetRecord {
@@ -668,14 +725,24 @@ mod tests {
         }
     }
 
-    /// A blob that looks like a PNG to the validator. Real pixel data is not
-    /// needed here; the signature is what the pack checks.
-    fn texture_blob(id: &str) -> TextureBlob {
+    /// A real PNG header (signature + IHDR) declaring `w` x `h`. Pixel data
+    /// is not needed: what the pack checks is that the header is genuine and
+    /// agrees with the declared size.
+    fn png_header(w: u32, h: u32) -> Vec<u8> {
         let mut png = PNG_SIGNATURE.to_vec();
-        png.extend_from_slice(b"IHDR-ish payload");
+        png.extend_from_slice(&13u32.to_be_bytes()); // IHDR length
+        png.extend_from_slice(b"IHDR");
+        png.extend_from_slice(&w.to_be_bytes());
+        png.extend_from_slice(&h.to_be_bytes());
+        png.extend_from_slice(&[8, 6, 0, 0, 0]); // depth, colour type, etc.
+        png.extend_from_slice(&[0, 0, 0, 0]); // CRC placeholder
+        png
+    }
+
+    fn texture_blob(id: &str) -> TextureBlob {
         TextureBlob {
             id: id.into(),
-            png,
+            png: png_header(2, 2),
             sampler: SamplerMode::Nearest,
             width: 2,
             height: 2,
@@ -1175,7 +1242,7 @@ mod tests {
     fn size_report_states_the_real_encoded_length() {
         let mut pack = AssetPack::new();
         pack.assets.push(asset("a.one"));
-        let mut png = PNG_SIGNATURE.to_vec();
+        let mut png = png_header(32, 32);
         png.resize(2048, 0);
         pack.textures.push(TextureBlob {
             id: "page_a".into(),
@@ -1187,7 +1254,10 @@ mod tests {
         let report = pack.size_report().unwrap();
         assert_eq!(report.assets, 1);
         assert_eq!(report.texture_bytes, 2048);
-        assert_eq!(report.encoded_bytes, pack.to_postcard().unwrap().len());
+        assert_eq!(
+            report.encoded_bytes,
+            pack.to_postcard_current().unwrap().len()
+        );
         assert_eq!(report.triangles, pack.assets[0].mesh.triangle_count());
     }
 
@@ -1274,6 +1344,116 @@ mod tests {
     }
 
     #[test]
+    fn a_texture_whose_header_disagrees_with_its_declared_size_is_rejected() {
+        // Signature-only checking would let this through, and the mismatch
+        // would surface as a broken page in a browser instead of at bake.
+        let mut pack = AssetPack::new();
+        let mut blob = texture_blob("page");
+        blob.png = png_header(64, 64);
+        pack.textures.push(blob);
+        assert!(pack
+            .validate()
+            .iter()
+            .any(|i| i.message.contains("but the PNG is 64x64")));
+    }
+
+    #[test]
+    fn signature_prefixed_garbage_is_not_accepted_as_a_png() {
+        let mut pack = AssetPack::new();
+        let mut blob = texture_blob("page");
+        let mut png = PNG_SIGNATURE.to_vec();
+        png.extend_from_slice(b"IHDR-ish payload but not really");
+        blob.png = png;
+        pack.textures.push(blob);
+        assert!(pack
+            .validate()
+            .iter()
+            .any(|i| i.message.contains("no IHDR chunk")));
+    }
+
+    #[test]
+    fn record_vectors_are_canonicalized_too() {
+        // material_slots and sockets are semantically unordered, so reversing
+        // either must not change the file.
+        fn build(reverse: bool) -> AssetPack {
+            let mesh = procmesh::cuboid(1.0, 2.0, 3.0);
+            let mut rec = record("a.one", &mesh);
+            let mut sockets = vec![
+                Socket {
+                    name: "alpha".into(),
+                    position: [0.0; 3],
+                    direction: [0.0, 0.0, -1.0],
+                },
+                Socket {
+                    name: "beta".into(),
+                    position: [0.0; 3],
+                    direction: [0.0, 0.0, -1.0],
+                },
+            ];
+            let mut slots = vec!["mat.a".to_string(), "mat.b".to_string()];
+            if reverse {
+                sockets.reverse();
+                slots.reverse();
+            }
+            rec.sockets = sockets;
+            rec.material_slots = slots;
+            let total = mesh.indices.len() as u32;
+            let half = total / 2 / 3 * 3;
+            let mut pack = AssetPack::new();
+            pack.assets.push(PackedAsset {
+                record: rec,
+                mesh,
+                submeshes: vec![
+                    SubMesh {
+                        material: Some("mat.a".into()),
+                        index_start: 0,
+                        index_count: half,
+                    },
+                    SubMesh {
+                        material: Some("mat.b".into()),
+                        index_start: half,
+                        index_count: total - half,
+                    },
+                ],
+            });
+            for id in ["mat.a", "mat.b"] {
+                pack.materials.push(PackedMaterial {
+                    id: id.into(),
+                    desc: MaterialDesc::default(),
+                    base_color_texture: None,
+                });
+            }
+            pack
+        }
+        assert_eq!(build(false).validate(), vec![]);
+        assert_eq!(build(true).validate(), vec![]);
+        assert_eq!(
+            build(false).to_postcard().unwrap(),
+            build(true).to_postcard().unwrap()
+        );
+    }
+
+    #[test]
+    fn the_validated_decoder_rejects_a_bad_pack() {
+        let mut pack = AssetPack::new();
+        let mut bad = asset("a.big");
+        bad.record.budget = PerfBudget {
+            max_triangles: 1,
+            max_vertices: 1,
+        };
+        pack.assets.push(bad);
+        let bytes = pack.to_postcard().unwrap();
+        assert!(
+            AssetPack::from_postcard(&bytes).is_ok(),
+            "decode-only is lenient"
+        );
+        assert!(matches!(
+            AssetPack::from_postcard_validated(&bytes),
+            Err(PackError::Invalid(_))
+        ));
+    }
+
+    #[test]
     fn a_texture_with_no_declared_size_is_rejected() {
         let mut pack = AssetPack::new();
         let mut blob = texture_blob("page");
@@ -1283,6 +1463,7 @@ mod tests {
             .validate()
             .iter()
             .any(|i| i.message.contains("0x2 size")));
+        assert!(pack.to_postcard_current().is_err());
     }
 
     #[test]

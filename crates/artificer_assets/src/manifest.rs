@@ -865,6 +865,17 @@ pub fn validate_asset(record: &AssetRecord, mesh: &MeshData) -> Vec<ValidationIs
     }
     if !record.pivot.iter().all(|c| c.is_finite()) {
         issues.push(issue(id, "pivot is not finite"));
+    } else if record.pivot.iter().any(|c| c.abs() > 1.0e6) {
+        // Containment is deliberately not checked (see below), but a pivot a
+        // thousand kilometres out is not a shared origin under any authoring
+        // scheme -- it is a corrupt number that happens to be finite.
+        issues.push(issue(
+            id,
+            format!(
+                "pivot {:?} is beyond any plausible authoring space",
+                record.pivot
+            ),
+        ));
     }
 
     let actual = mesh.bounds().expect("validated mesh has bounds");
@@ -1719,6 +1730,16 @@ mod tests {
                 "an off-origin kit piece at {offset:?} must validate"
             );
         }
+    }
+
+    #[test]
+    fn an_absurd_but_finite_pivot_is_caught() {
+        let mesh = procmesh::cuboid(1.0, 1.0, 2.0);
+        let mut record = record_for(&mesh, "kit.part");
+        record.pivot = [f32::MAX, 0.0, 0.0];
+        assert!(validate_asset(&record, &mesh)
+            .iter()
+            .any(|i| i.message.contains("plausible authoring space")));
     }
 
     #[test]

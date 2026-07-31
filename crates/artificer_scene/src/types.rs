@@ -108,7 +108,10 @@ pub enum AlphaModeDesc {
 /// file by naming only what differs from the default. Without it, overriding
 /// one colour in an import manifest means spelling out all seven fields.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
+// `default` alone would let a misspelled field ("roughnes") silently become
+// the default value, which is the exact failure deny_unknown_fields exists to
+// prevent everywhere else in the import vocabulary.
+#[serde(default, deny_unknown_fields)]
 pub struct MaterialDesc {
     pub base_color: [f32; 4],
     pub metallic: f32,
