@@ -27,8 +27,12 @@ foreach ($forbidden in @("ufbx", "artificer_assets_import")) {
     }
 }
 
-Write-Host "== sample generality test (samples/minimal builds with public APIs only) =="
+Write-Host "== sample generality test (samples build with public APIs only) =="
 cargo build -p minimal
+if ($LASTEXITCODE -ne 0) { exit 1 }
+# The asset-pipeline sample RUNS rather than merely compiling: importing and
+# baking need no GPU, so it exercises the real code path in CI.
+cargo run -p asset_import_sample
 if ($LASTEXITCODE -ne 0) { exit 1 }
 
 Write-Host "ENGINE CHECK: PASS"

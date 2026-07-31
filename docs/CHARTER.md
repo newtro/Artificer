@@ -20,7 +20,17 @@ a sibling-path override; semantic versioning begins after MVP stabilization.
 - Rapier physics adapter (`artificer_physics`)
 - Input and camera foundations (`artificer_input`, `artificer_render`)
 - Network transport, prediction, interpolation, reconciliation (`artificer_net`, added at M2)
-- Asset manifests, procedural mesh builders, validation (`artificer_assets`)
+- Asset manifests, procedural mesh builders, validation, the baked pack
+  format and its runtime loader (`artificer_assets`)
+- Importing source art -- FBX, OBJ, glTF -- into that pack
+  (`artificer_assets_import`). NATIVE ONLY: `artificer_assets` compiles into
+  the WASM client and must never depend on this crate, which is what keeps a
+  model parser out of a browser bundle. Both check scripts assert the edge
+  does not exist. See ADR-0003.
+
+**The engine ships the pipeline; games ship the art.** No game art lives in
+this repository. Test fixtures are CC0 (Kenney) precisely so a public repo can
+carry them; licensed art belongs in the consuming game's own repo.
 - Browser, Windows, and headless platform adapters (`artificer_render` / headless runners)
 - Agent client SDK (`artificer_agent`, added at M4)
 - Scenario compiler, inspection, testkit (`artificer_testkit`)

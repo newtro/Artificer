@@ -9,6 +9,11 @@
 mod mesh;
 mod types;
 
+/// The maths types this crate's API is expressed in, re-exported so
+/// consumers use the SAME version rather than independently picking one that
+/// has to happen to match. A mismatched glam is a wall of confusing type
+/// errors at the boundary.
+pub use glam;
 pub use mesh::{Aabb, MeshData};
 pub use types::*;
 

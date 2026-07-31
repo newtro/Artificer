@@ -25,3 +25,5 @@ gltf = "1.4.1"
 # The RUNTIME never decodes -- packs carry encoded PNG and the renderer has a
 # decoder already -- which is why this dependency stays on the native side.
 image = { version = "0.25", default-features = false, features = ["png"] }
+# CLI only.
+env_logger = "0.11"

@@ -1,0 +1,15 @@
+[package]
+name = "asset_import_sample"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# Generality test (plan §9.4): this sample uses ONLY public engine APIs and
+# imports nothing from any game. If it compiles and runs, a game can do the
+# same thing without reaching into the engine's internals.
+
+[dependencies]
+artificer_assets = { workspace = true }
+artificer_assets_import = { workspace = true }
+artificer_scene = { workspace = true }

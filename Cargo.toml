@@ -12,6 +12,7 @@ members = [
     "crates/artificer_agent",
     "crates/artificer_testkit",
     "samples/minimal",
+    "samples/asset_import",
 ]
 
 [workspace.package]
