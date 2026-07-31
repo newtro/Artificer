@@ -103,7 +103,12 @@ pub enum AlphaModeDesc {
 
 /// PBR-ish material description. `emissive` components may exceed 1.0 to
 /// drive bloom on HDR cameras.
+///
+/// Every field is `#[serde(default)]` so a material can be authored in a data
+/// file by naming only what differs from the default. Without it, overriding
+/// one colour in an import manifest means spelling out all seven fields.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct MaterialDesc {
     pub base_color: [f32; 4],
     pub metallic: f32,

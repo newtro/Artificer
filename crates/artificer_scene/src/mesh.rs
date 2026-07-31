@@ -92,6 +92,18 @@ impl MeshData {
                 return Err("non-finite vertex position".into());
             }
         }
+        // Normals and UVs reach GPU buffers as directly as positions do, so a
+        // NaN in either is just as much a corrupt mesh.
+        for n in &self.normals {
+            if !n.iter().all(|c| c.is_finite()) {
+                return Err("non-finite vertex normal".into());
+            }
+        }
+        for uv in &self.uvs {
+            if !uv.iter().all(|c| c.is_finite()) {
+                return Err("non-finite vertex uv".into());
+            }
+        }
         Ok(())
     }
 

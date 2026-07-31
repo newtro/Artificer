@@ -20,6 +20,7 @@ pub enum AssetCategory {
 
 /// Simplified collision geometry the physics adapter can build directly.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub enum CollisionProxy {
     /// Half-extents of a box centered on the pivot.
     Cuboid {
@@ -38,6 +39,7 @@ pub enum CollisionProxy {
 
 /// Named attachment point (hardpoints, engines, docking ports).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Socket {
     pub name: String,
     pub position: [f32; 3],
@@ -46,6 +48,7 @@ pub struct Socket {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub enum LodPolicy {
     /// Single mesh at all distances (small props, MVP default).
     Single,
@@ -54,6 +57,7 @@ pub enum LodPolicy {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PerfBudget {
     pub max_triangles: u32,
     pub max_vertices: u32,
@@ -80,7 +84,11 @@ pub struct AssetRecord {
     pub bounds_max: [f32; 3],
     pub collision: CollisionProxy,
     pub sockets: Vec<Socket>,
-    /// Material slots the asset expects (empty = engine default PBR).
+    /// PACKED MATERIAL IDS this asset draws with (`atlas.page_a`,
+    /// `mat.ship.hull`), deduplicated and sorted — NOT source-file material
+    /// names. Empty means "unspecified", not "none": the pack cross-checks
+    /// this against the asset's submeshes only when it is populated, so a
+    /// record may leave it empty and let the submeshes speak for themselves.
     pub material_slots: Vec<String>,
     pub lod: LodPolicy,
     pub budget: PerfBudget,
@@ -169,6 +177,7 @@ pub enum Handedness {
 /// left-handed Z-up with **+X** forward, which no up/forward-only naming
 /// scheme covers. Constructors for the common tools are provided below.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub enum AxisConvention {
     /// Trust the axis, handedness, and unit metadata the FILE declares. FBX
     /// and glTF both carry it, so this is correct for them and is the
@@ -259,6 +268,52 @@ impl AxisConvention {
             AxisConvention::Explicit { up, forward, .. } => !up.is_parallel_to(forward),
         }
     }
+
+    /// The matrix that takes a point from this frame into the engine's
+    /// (`right-handed, Y up, -Z forward`).
+    ///
+    /// This lives here, computed once, because the third-axis sign is the
+    /// easiest thing in an importer to get backwards and the failure is
+    /// silent — mirrored geometry that looks almost right. The rule flips
+    /// with handedness:
+    ///
+    /// * right-handed: `right = forward × up`
+    /// * left-handed:  `right = up × forward`
+    ///
+    /// Check it against the engine's own frame: `up = +Y`, `forward = -Z`,
+    /// right-handed gives `right = (-Z) × (+Y) = +X`. Correct. Using the
+    /// left-handed rule there would yield `-X` and mirror every asset.
+    ///
+    /// Returns `None` for [`AxisConvention::FromSource`], where the frame is
+    /// whatever the file declares and the importer must resolve it first, and
+    /// for a malformed frame.
+    pub fn to_engine_basis(self) -> Option<glam::Mat3> {
+        let AxisConvention::Explicit {
+            up,
+            forward,
+            handedness,
+        } = self
+        else {
+            return None;
+        };
+        if up.is_parallel_to(forward) {
+            return None;
+        }
+        let up_v = up.to_vec3();
+        let fwd_v = forward.to_vec3();
+        let right_v = match handedness {
+            Handedness::Right => fwd_v.cross(up_v),
+            Handedness::Left => up_v.cross(fwd_v),
+        };
+        // Rows map the source's (right, up, forward) onto the engine's
+        // (+X, +Y, -Z), so a point expressed in the source frame comes out
+        // expressed in the engine's.
+        Some(glam::Mat3::from_cols(
+            glam::Vec3::new(right_v.x, up_v.x, -fwd_v.x),
+            glam::Vec3::new(right_v.y, up_v.y, -fwd_v.y),
+            glam::Vec3::new(right_v.z, up_v.z, -fwd_v.z),
+        ))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -293,6 +348,7 @@ pub enum SamplerMode {
 
 /// Which meshes to take out of a source file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub enum MeshSelect {
     /// Every mesh in the file, merged into one asset.
     #[default]
@@ -305,6 +361,7 @@ pub enum MeshSelect {
 
 /// How an imported asset gets its surface.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub enum MaterialMapping {
     /// Engine default PBR, no texture.
     #[default]
@@ -329,9 +386,15 @@ pub enum MaterialMapping {
 pub enum MaterialSelector {
     /// Material name as it appears in the source file.
     Name(String),
-    /// Material slot index within the mesh, for sources whose materials are
-    /// unnamed or share a name — both of which real exporters produce, and
-    /// neither of which a name can address.
+    /// Material slot index in the MERGED asset: source materials numbered in
+    /// the order they are first encountered while merging the meshes selected
+    /// by [`MeshSelect`], which fixes both the merge order and this numbering.
+    /// For sources whose materials are unnamed or share a name — both of
+    /// which real exporters produce, and neither of which a name can address.
+    ///
+    /// A slot addressed by BOTH a `Name` and an `Index` binding takes the
+    /// `Name` one: names are what an author writes deliberately, indices are
+    /// positional and shift when a source file is re-exported.
     Index(u32),
 }
 
@@ -666,6 +729,26 @@ impl ImportManifest {
             if mesh.budget.max_triangles == 0 || mesh.budget.max_vertices == 0 {
                 issues.push(issue(id, "perf budget of zero can never be satisfied"));
             }
+            if let LodPolicy::Cull { hide_beyond_m: 0 } = mesh.lod {
+                issues.push(issue(id, "a cull distance of 0 hides the asset always"));
+            }
+            for socket in &mesh.sockets {
+                if socket.name.trim().is_empty() {
+                    issues.push(issue(id, "socket has an empty name"));
+                }
+            }
+            {
+                let mut names: Vec<&str> = Vec::new();
+                for socket in &mesh.sockets {
+                    if names.contains(&socket.name.as_str()) {
+                        issues.push(issue(
+                            id,
+                            format!("duplicate socket name '{}'", socket.name),
+                        ));
+                    }
+                    names.push(&socket.name);
+                }
+            }
             for mapping in std::iter::once(&mesh.material)
                 .chain(mesh.material_bindings.iter().map(|b| &b.mapping))
             {
@@ -811,17 +894,34 @@ pub fn validate_asset(record: &AssetRecord, mesh: &MeshData) -> Vec<ValidationIs
         ));
     }
 
-    let pivot = Vec3::from_array(record.pivot);
-    let grown = Aabb {
-        min: actual.min - Vec3::splat(tolerance),
-        max: actual.max + Vec3::splat(tolerance),
+    // ONE generous "plausible neighbourhood" shared by the pivot and every
+    // socket. It is deliberately loose: attachment points and shared-origin
+    // pivots legitimately sit well outside the geometry, and a tight bound
+    // fails good content. What it still catches is the failure that actually
+    // happens — coordinates left in the source file's units, which land
+    // orders of magnitude out (a 10 m hull with a socket at 560).
+    //
+    // The margin uses the LARGEST extent rather than the diagonal so a
+    // degenerate axis (a flat decal, a thin sail) does not shrink the
+    // allowance to nothing in the very direction the socket sticks out.
+    let margin = (actual.extents().max_element() * 2.0).max(2.0);
+    let plausible = Aabb {
+        min: actual.min - Vec3::splat(margin),
+        max: actual.max + Vec3::splat(margin),
     };
-    if pivot.is_finite() && !grown.contains(pivot) {
-        issues.push(issue(
-            id,
-            format!("pivot {pivot:?} lies outside geometry bounds"),
-        ));
-    }
+
+    // The pivot is checked for finiteness ONLY — deliberately not for
+    // containment.
+    //
+    // A pivot outside the geometry is normal, not suspicious: modular kit
+    // parts are authored around a SHARED ship origin so they snap together,
+    // which puts a wing's pivot several part-lengths from the wing. There is
+    // no geometric test that separates that from a units mistake, and any
+    // distance threshold either rejects real kit parts or is too loose to
+    // catch anything. The check that DOES have ground truth is the
+    // declared-vs-actual bounds cross-check above, which compares the record
+    // against the geometry it describes; this one only produced false bake
+    // failures on exactly the content the pipeline exists to import.
 
     // Sockets get a GENEROUS containment margin, not the tight bounds
     // tolerance. Attachment points legitimately sit proud of the geometry —
@@ -830,11 +930,6 @@ pub fn validate_asset(record: &AssetRecord, mesh: &MeshData) -> Vec<ValidationIs
     // bake failures on perfectly good content. The margin still catches the
     // failure that matters: coordinates copied out of a DCC tool in the source
     // file's units, which land orders of magnitude away, not centimetres.
-    let socket_margin = (actual.extents().length() * 0.25).max(1.0);
-    let socket_bounds = Aabb {
-        min: actual.min - Vec3::splat(socket_margin),
-        max: actual.max + Vec3::splat(socket_margin),
-    };
     let mut socket_names: Vec<&str> = Vec::new();
     for socket in &record.sockets {
         if socket.name.trim().is_empty() {
@@ -857,12 +952,12 @@ pub fn validate_asset(record: &AssetRecord, mesh: &MeshData) -> Vec<ValidationIs
             ));
             continue;
         }
-        if !socket_bounds.contains(p) {
+        if !plausible.contains(p) {
             issues.push(issue(
                 id,
                 format!(
                     "socket '{}' at {p:?} is implausibly far from the geometry \
-                     (>{socket_margin:.2}m outside) — wrong units?",
+                     (>{margin:.2}m outside) — wrong units?",
                     socket.name
                 ),
             ));
@@ -1403,6 +1498,64 @@ mod tests {
     }
 
     #[test]
+    fn the_engine_frame_maps_to_itself() {
+        // The identity case is the one that catches a wrong third-axis sign:
+        // if the handedness rule were inverted, engine-native would come back
+        // mirrored in X rather than as the identity.
+        let m = AxisConvention::engine_native().to_engine_basis().unwrap();
+        for axis in [Vec3::X, Vec3::Y, Vec3::Z] {
+            assert!((m * axis - axis).length() < 1e-6, "{axis:?} moved: {m:?}");
+        }
+    }
+
+    #[test]
+    fn a_z_up_source_becomes_y_up() {
+        // Blender: right-handed, Z up, -Y forward. Its up (+Z) must land on
+        // the engine's up (+Y), and its forward (-Y) on the engine's -Z.
+        let m = AxisConvention::blender().to_engine_basis().unwrap();
+        let up = m * Vec3::Z;
+        let fwd = m * Vec3::NEG_Y;
+        assert!((up - Vec3::Y).length() < 1e-6, "up became {up:?}");
+        assert!(
+            (fwd - Vec3::NEG_Z).length() < 1e-6,
+            "forward became {fwd:?}"
+        );
+        // Right-handed in, right-handed out: determinant is +1, no mirroring.
+        assert!((m.determinant() - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_left_handed_source_mirrors_and_says_so() {
+        // Unity and Unreal are left-handed; converting mirrors an axis, which
+        // is exactly why changes_handedness() drives a winding flip.
+        for convention in [AxisConvention::unity(), AxisConvention::unreal()] {
+            let m = convention.to_engine_basis().unwrap();
+            assert!(
+                m.determinant() < 0.0,
+                "a left-handed frame must mirror: {convention:?} gave det {}",
+                m.determinant()
+            );
+            assert_eq!(convention.changes_handedness(), Some(true));
+        }
+        // ...and the up/forward mapping still lands where it should.
+        let m = AxisConvention::unreal().to_engine_basis().unwrap();
+        assert!((m * Vec3::Z - Vec3::Y).length() < 1e-6);
+        assert!((m * Vec3::X - Vec3::NEG_Z).length() < 1e-6);
+    }
+
+    #[test]
+    fn an_unresolved_or_malformed_frame_has_no_basis() {
+        assert!(AxisConvention::FromSource.to_engine_basis().is_none());
+        assert!(AxisConvention::Explicit {
+            up: Axis::PosY,
+            forward: Axis::NegY,
+            handedness: Handedness::Right,
+        }
+        .to_engine_basis()
+        .is_none());
+    }
+
+    #[test]
     fn unreal_is_z_up_x_forward_not_y_forward() {
         // Named constructors exist because up/forward alone cannot describe
         // every tool: Unreal is the case a Y-forward-only vocabulary gets
@@ -1546,6 +1699,123 @@ mod tests {
         assert!(validate_asset(&record, &mesh)
             .iter()
             .any(|i| i.message.contains("duplicate socket name")));
+    }
+
+    #[test]
+    fn an_off_origin_kit_piece_keeps_its_authored_pivot() {
+        // Modular kit parts are authored around a SHARED ship origin so they
+        // snap together: a nacelle at x=+3, a wing at x=-6. A strict pivot
+        // containment check rejects every one of them and makes the default
+        // AsAuthored policy unusable.
+        for offset in [[3.0, 0.0, 0.0], [-6.0, 0.0, 0.0], [0.0, 4.0, 0.0]] {
+            let mesh = procmesh::transform_mesh(
+                &procmesh::cuboid(1.0, 1.0, 2.0),
+                &artificer_scene::TransformDesc::from_translation(Vec3::from_array(offset)),
+            );
+            let record = record_for(&mesh, "kit.part");
+            assert_eq!(
+                validate_asset(&record, &mesh),
+                vec![],
+                "an off-origin kit piece at {offset:?} must validate"
+            );
+        }
+    }
+
+    #[test]
+    fn a_non_finite_pivot_is_still_caught() {
+        // Containment is deliberately not checked (shared-origin kit parts),
+        // but a NaN pivot is unusable by anything downstream.
+        let mesh = procmesh::cuboid(1.0, 1.0, 2.0);
+        let mut record = record_for(&mesh, "kit.part");
+        record.pivot = [f32::NAN, 0.0, 0.0];
+        assert!(validate_asset(&record, &mesh)
+            .iter()
+            .any(|i| i.message.contains("pivot is not finite")));
+    }
+
+    #[test]
+    fn a_socket_on_a_flat_decal_is_not_squeezed_out_by_the_margin() {
+        // The margin uses the largest extent, not the diagonal, so a
+        // degenerate axis does not shrink the allowance to nothing in the
+        // very direction the socket sticks out.
+        let mesh = procmesh::quad_xz(4.0, 4.0);
+        let mut record = record_for(&mesh, "decal.flat");
+        record.sockets = vec![Socket {
+            name: "anchor".into(),
+            position: [0.0, 2.0, 0.0],
+            direction: [0.0, 1.0, 0.0],
+        }];
+        assert_eq!(validate_asset(&record, &mesh), vec![]);
+    }
+
+    #[test]
+    fn a_zero_cull_distance_is_rejected() {
+        let mut manifest = valid_import_manifest();
+        manifest.meshes[0].lod = LodPolicy::Cull { hide_beyond_m: 0 };
+        assert!(issues_of(&manifest)
+            .iter()
+            .any(|m| m.contains("hides the asset always")));
+    }
+
+    #[test]
+    fn socket_name_problems_are_caught_before_any_file_is_opened() {
+        // validate_asset catches these too, but only after the FBX has been
+        // read -- which defeats the "fails fast" contract.
+        let mut manifest = valid_import_manifest();
+        manifest.meshes[0].sockets = vec![
+            Socket {
+                name: "mount".into(),
+                position: [0.0; 3],
+                direction: [0.0, 0.0, -1.0],
+            },
+            Socket {
+                name: "mount".into(),
+                position: [0.0; 3],
+                direction: [0.0, 0.0, -1.0],
+            },
+        ];
+        assert!(issues_of(&manifest)
+            .iter()
+            .any(|m| m.contains("duplicate socket name")));
+    }
+
+    #[test]
+    fn an_override_material_can_be_authored_by_naming_one_field() {
+        // Every other MeshImport knob is optional; Override must be too, or
+        // the documented custom-shader path costs seven fields of boilerplate.
+        let json = r#"{
+            "sources": [{ "id": "s", "path": "a.glb" }],
+            "meshes": [{
+                "id": "asset.a", "source": "s", "category": "Prop",
+                "material": { "Override": { "base_color": [0.1, 0.2, 0.3, 1.0] } },
+                "budget": { "max_triangles": 100, "max_vertices": 200 },
+                "provenance": "kenney:space-kit", "license": "CC0",
+                "gameplay_ref": "x"
+            }]
+        }"#;
+        let parsed = ImportManifest::from_json(json).expect("Override should be terse");
+        assert!(parsed.validate().is_empty());
+    }
+
+    #[test]
+    fn a_misspelled_key_in_a_nested_type_is_also_a_hard_error() {
+        // deny_unknown_fields must reach the nested vocabulary, not just the
+        // top-level structs -- a typo inside "collision" is just as invisible.
+        let json = r#"{
+            "sources": [{ "id": "s", "path": "a.glb" }],
+            "meshes": [{
+                "id": "asset.a", "source": "s", "category": "Prop",
+                "collision": { "CapsuleZ": { "half_height": 1.0, "radius": 1.0, "axis": "Y" } },
+                "budget": { "max_triangles": 100, "max_vertices": 200 },
+                "provenance": "kenney:space-kit", "license": "CC0",
+                "gameplay_ref": "x"
+            }]
+        }"#;
+        let err = ImportManifest::from_json(json).unwrap_err().to_string();
+        assert!(
+            err.contains("axis"),
+            "error should name the key, got: {err}"
+        );
     }
 
     #[test]

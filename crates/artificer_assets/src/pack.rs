@@ -33,6 +33,9 @@ pub const PACK_MAGIC: [u8; 4] = *b"ARTP";
 /// handle. A pack that disagrees is rejected rather than misread.
 pub const PACK_FORMAT_VERSION: u16 = 1;
 
+/// The eight bytes every PNG starts with.
+const PNG_SIGNATURE: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TextureBlob {
     pub id: String,
@@ -134,6 +137,7 @@ pub enum PackError {
     DuplicateId(String),
     MeshTooLarge(usize),
     MaterialConflict { id: String },
+    Invalid(Vec<ValidationIssue>),
     UnsupportedVersion { found: u16, expected: u16 },
 }
 
@@ -159,6 +163,18 @@ impl std::fmt::Display for PackError {
                 f,
                 "material id '{id}' is claimed by two different descriptions"
             ),
+            PackError::Invalid(issues) => {
+                write!(f, "pack failed validation ({} issues):", issues.len())?;
+                for i in issues {
+                    write!(
+                        f,
+                        "
+  {}: {}",
+                        i.asset_id, i.message
+                    )?;
+                }
+                Ok(())
+            }
             PackError::UnsupportedVersion { found, expected } => write!(
                 f,
                 "pack format version {found} is not readable by this build (expects {expected})"
@@ -220,6 +236,13 @@ impl AssetPack {
         self.assets.sort_by(|a, b| a.record.id.cmp(&b.record.id));
         self.materials.sort_by(|a, b| a.id.cmp(&b.id));
         self.textures.sort_by(|a, b| a.id.cmp(&b.id));
+        // Submeshes too. Validation deliberately accepts them in any order
+        // (an importer emits them in encounter order), so without this the
+        // same content encodes to different bytes depending on that order —
+        // which is exactly the determinism guarantee this method exists for.
+        for asset in &mut self.assets {
+            asset.submeshes.sort_by_key(|s| s.index_start);
+        }
     }
 
     /// First duplicate id across any collection, if there is one. Duplicates
@@ -258,6 +281,10 @@ impl AssetPack {
     /// value says. This is what a bake calls; `to_postcard` honours the field
     /// so tests can construct a pack from another version honestly.
     pub fn to_postcard_current(&self) -> Result<Vec<u8>, PackError> {
+        let issues = self.validate();
+        if !issues.is_empty() {
+            return Err(PackError::Invalid(issues));
+        }
         let mut stamped = self.clone();
         stamped.format_version = PACK_FORMAT_VERSION;
         stamped.to_postcard()
@@ -418,6 +445,18 @@ impl AssetPack {
         }
 
         for material in &self.materials {
+            if material.id.trim().is_empty() {
+                issues.push(ValidationIssue {
+                    asset_id: "<pack>".into(),
+                    message: "material has an empty id".into(),
+                });
+            }
+            if let Some(problem) = crate::manifest::material_problem(&material.desc) {
+                issues.push(ValidationIssue {
+                    asset_id: material.id.clone(),
+                    message: problem,
+                });
+            }
             if let Some(texture) = &material.base_color_texture {
                 if self.texture(texture).is_none() {
                     issues.push(ValidationIssue {
@@ -428,10 +467,32 @@ impl AssetPack {
             }
         }
         for texture in &self.textures {
+            if texture.id.trim().is_empty() {
+                issues.push(ValidationIssue {
+                    asset_id: "<pack>".into(),
+                    message: "texture has an empty id".into(),
+                });
+            }
             if texture.png.is_empty() {
                 issues.push(ValidationIssue {
                     asset_id: texture.id.clone(),
                     message: "texture blob carries no bytes".into(),
+                });
+            } else if !texture.png.starts_with(&PNG_SIGNATURE) {
+                // The blob is handed straight to an image decoder at load, so
+                // "not actually a PNG" must fail at bake, not in the browser.
+                issues.push(ValidationIssue {
+                    asset_id: texture.id.clone(),
+                    message: "texture blob is not a PNG (bad signature)".into(),
+                });
+            }
+            if texture.width == 0 || texture.height == 0 {
+                issues.push(ValidationIssue {
+                    asset_id: texture.id.clone(),
+                    message: format!(
+                        "texture declares a {}x{} size",
+                        texture.width, texture.height
+                    ),
                 });
             }
         }
@@ -607,10 +668,14 @@ mod tests {
         }
     }
 
+    /// A blob that looks like a PNG to the validator. Real pixel data is not
+    /// needed here; the signature is what the pack checks.
     fn texture_blob(id: &str) -> TextureBlob {
+        let mut png = PNG_SIGNATURE.to_vec();
+        png.extend_from_slice(b"IHDR-ish payload");
         TextureBlob {
             id: id.into(),
-            png: vec![1, 2, 3, 4],
+            png,
             sampler: SamplerMode::Nearest,
             width: 2,
             height: 2,
@@ -1110,9 +1175,11 @@ mod tests {
     fn size_report_states_the_real_encoded_length() {
         let mut pack = AssetPack::new();
         pack.assets.push(asset("a.one"));
+        let mut png = PNG_SIGNATURE.to_vec();
+        png.resize(2048, 0);
         pack.textures.push(TextureBlob {
             id: "page_a".into(),
-            png: vec![0u8; 2048],
+            png,
             sampler: SamplerMode::Nearest,
             width: 32,
             height: 32,
@@ -1122,6 +1189,120 @@ mod tests {
         assert_eq!(report.texture_bytes, 2048);
         assert_eq!(report.encoded_bytes, pack.to_postcard().unwrap().len());
         assert_eq!(report.triangles, pack.assets[0].mesh.triangle_count());
+    }
+
+    #[test]
+    fn submesh_order_does_not_change_the_bytes() {
+        // Determinism hole: validation accepts submeshes in any order (an
+        // importer emits them in encounter order), so canonicalize must sort
+        // them or the same content encodes differently.
+        fn build(reverse: bool) -> AssetPack {
+            let mesh = procmesh::cuboid(1.0, 2.0, 3.0);
+            let total = mesh.indices.len() as u32;
+            let third = total / 3 / 3 * 3;
+            let mut subs = vec![
+                SubMesh {
+                    material: None,
+                    index_start: 0,
+                    index_count: third,
+                },
+                SubMesh {
+                    material: None,
+                    index_start: third,
+                    index_count: third,
+                },
+                SubMesh {
+                    material: None,
+                    index_start: third * 2,
+                    index_count: total - third * 2,
+                },
+            ];
+            if reverse {
+                subs.reverse();
+            }
+            let mut pack = AssetPack::new();
+            pack.assets.push(PackedAsset {
+                record: record("a.one", &mesh),
+                mesh,
+                submeshes: subs,
+            });
+            pack
+        }
+        assert_eq!(build(false).validate(), vec![], "both orders are valid");
+        assert_eq!(build(true).validate(), vec![]);
+        assert_eq!(
+            build(false).to_postcard().unwrap(),
+            build(true).to_postcard().unwrap()
+        );
+    }
+
+    #[test]
+    fn a_nonsense_material_cannot_reach_a_pack() {
+        // Same argument that moved finiteness into validate_asset: a pack can
+        // be built or decoded without ever seeing an import manifest.
+        let mut pack = AssetPack::new();
+        pack.assets.push(asset("a.one"));
+        pack.materials.push(PackedMaterial {
+            id: "mat.bad".into(),
+            desc: MaterialDesc {
+                roughness: f32::NAN,
+                metallic: 99.0,
+                ..Default::default()
+            },
+            base_color_texture: None,
+        });
+        assert!(pack
+            .validate()
+            .iter()
+            .any(|i| i.message.contains("not finite")));
+    }
+
+    #[test]
+    fn a_texture_blob_that_is_not_a_png_is_rejected() {
+        let mut pack = AssetPack::new();
+        pack.textures.push(TextureBlob {
+            id: "page".into(),
+            png: vec![1, 2, 3, 4],
+            sampler: SamplerMode::Nearest,
+            width: 2,
+            height: 2,
+        });
+        assert!(pack
+            .validate()
+            .iter()
+            .any(|i| i.message.contains("not a PNG")));
+    }
+
+    #[test]
+    fn a_texture_with_no_declared_size_is_rejected() {
+        let mut pack = AssetPack::new();
+        let mut blob = texture_blob("page");
+        blob.width = 0;
+        pack.textures.push(blob);
+        assert!(pack
+            .validate()
+            .iter()
+            .any(|i| i.message.contains("0x2 size")));
+    }
+
+    #[test]
+    fn the_bake_encoder_refuses_to_emit_an_invalid_pack() {
+        // to_postcard_current is what a bake calls; it must not be able to
+        // write a file that fails the pack's own validation.
+        let mut pack = AssetPack::new();
+        let mut bad = asset("a.big");
+        bad.record.budget = PerfBudget {
+            max_triangles: 1,
+            max_vertices: 1,
+        };
+        pack.assets.push(bad);
+        assert!(matches!(
+            pack.to_postcard_current(),
+            Err(PackError::Invalid(_))
+        ));
+        // The unchecked encoder still works, for tests that need to build
+        // deliberately-broken input.
+        assert!(pack.to_postcard().is_ok());
     }
 
     #[test]
