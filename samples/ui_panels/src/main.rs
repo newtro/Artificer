@@ -9,8 +9,8 @@
 mod hud;
 
 use artificer_ui::{
-    spawn_panel, ActiveSkin, ArtificerUiPlugin, BlankTexture, PanelDesc, PanelMaterial, Skin,
-    SkinId, SkinRegistry, TexturedSkin,
+    spawn_panel, ActiveSkin, ArtificerUiPlugin, BlankTexture, InstrumentMaterial, PanelDesc,
+    PanelMaterial, Skin, SkinId, SkinRegistry, TexturedSkin,
 };
 use bevy::core_pipeline::bloom::Bloom;
 use bevy::core_pipeline::tonemapping::Tonemapping;
@@ -173,7 +173,16 @@ fn main() {
     .insert_resource(ActiveSkin(SkinId::Builtin(skin_from_args())))
     .insert_resource(ClearColor(Color::srgb(0.008, 0.012, 0.02)))
     .add_systems(Startup, setup)
-    .add_systems(Update, (cycle_skin, orbit_camera, spin_prop, take_shot))
+    .add_systems(
+        Update,
+        (
+            cycle_skin,
+            orbit_camera,
+            spin_prop,
+            take_shot,
+            hud::animate_instruments,
+        ),
+    )
     .run();
 }
 
@@ -219,6 +228,7 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut panel_materials: ResMut<Assets<PanelMaterial>>,
+    mut instrument_materials: ResMut<Assets<InstrumentMaterial>>,
     mut std_materials: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
     mut registry: ResMut<SkinRegistry>,
@@ -358,6 +368,7 @@ fn setup(
             &mut commands,
             &mut meshes,
             &mut panel_materials,
+            &mut instrument_materials,
             &mut images,
             &registry,
             skin,

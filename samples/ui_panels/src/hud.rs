@@ -1,104 +1,217 @@
-//! Cockpit HUD mock: instruments as world-space panels around the viewer.
+//! Cockpit HUD mock built from instruments, not menus.
 //!
-//! The arrangement is the point. Instruments sit at the edges of vision,
-//! angled inward toward the pilot, with the flight view clear through the
-//! middle — so the whole HUD parallaxes and catches light like part of the
-//! ship instead of being pasted flat on the glass.
+//! The first version of this was five text panels arranged in a circle, which
+//! is a menu wearing a HUD's clothes. Real space-sim cockpits are drawn, not
+//! typed:
+//!
+//! - a **radar plane** whose contacts sit on vertical stalks, so a glance
+//!   tells you what is above and below you (Elite's best idea);
+//! - a **segmented throttle** with a set-point pin and an optimal-manoeuvring
+//!   band, so commanded speed and actual speed can visibly disagree;
+//! - **shield quadrants** as four independent arcs, so damage has a bearing;
+//! - **arc gauges** for readings you check by needle angle, not by digit;
+//! - a **pitch ladder** and a **bracket reticle** in the middle of the view.
+//!
+//! Text survives only where a number genuinely is the answer — credits,
+//! cargo, the name of the system you are in.
 
-use artificer_ui::{spawn_panel, PanelDesc, PanelMaterial, SkinId, SkinParams, SkinRegistry};
+use artificer_ui::{
+    instrument_quad, spawn_panel, Contact, ContactKind, InstrumentKind, InstrumentMaterial,
+    PanelDesc, PanelMaterial, SkinId, SkinParams, SkinRegistry,
+};
 use bevy::prelude::*;
 
-/// Build the full HUD in the active skin.
+/// Marks instruments the demo animates, so the mock reads as live
+/// instrumentation rather than a still frame.
+#[derive(Component)]
+pub struct Animated {
+    pub kind: InstrumentKind,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn build_hud(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     panel_materials: &mut Assets<PanelMaterial>,
+    instrument_materials: &mut Assets<InstrumentMaterial>,
     images: &mut Assets<Image>,
     registry: &SkinRegistry,
     skin: SkinId,
     blank: &Handle<Image>,
 ) {
     let p = registry.params(skin);
+    // Warning colour is deliberately NOT taken from the skin: red means
+    // damage under every skin, and a palette that could recolour it would be
+    // a safety bug rather than a style choice.
+    let warn = Color::srgb(1.0, 0.42, 0.28);
 
-    // Left: ship condition, yawed inward to face the pilot.
-    let left = panel(
+    let instrument = |commands: &mut Commands,
+                      meshes: &mut Assets<Mesh>,
+                      mats: &mut Assets<InstrumentMaterial>,
+                      kind: InstrumentKind,
+                      size: Vec2,
+                      transform: Transform,
+                      build: &dyn Fn(&mut InstrumentMaterial)| {
+        let mut m = InstrumentMaterial::new(kind, p.accent, warn, p.dim_text, size.x / size.y);
+        m.set_glow(p.emissive * 0.10);
+        build(&mut m);
+        commands.spawn((
+            Mesh3d(instrument_quad(meshes, size)),
+            MeshMaterial3d(mats.add(m)),
+            transform,
+            Animated { kind },
+        ));
+    };
+
+    // ---- centre of view: pitch ladder and reticle ----
+    instrument(
         commands,
         meshes,
-        panel_materials,
-        images,
-        skin,
-        blank,
-        Vec2::new(0.64, 0.56),
-        Transform::from_xyz(-0.97, -0.06, -1.85).with_rotation(Quat::from_rotation_y(0.42)),
+        instrument_materials,
+        InstrumentKind::Ladder,
+        Vec2::splat(0.95),
+        Transform::from_xyz(0.0, 0.0, -1.9),
+        &|m| {
+            m.set_thickness(0.010);
+            m.set_glow(0.05);
+        },
     );
-    // Right: navigation and holdings.
-    let right = panel(
+    instrument(
         commands,
         meshes,
-        panel_materials,
-        images,
-        skin,
-        blank,
-        Vec2::new(0.64, 0.56),
-        Transform::from_xyz(0.97, -0.06, -1.85).with_rotation(Quat::from_rotation_y(-0.42)),
-    );
-    // Bottom: throttle and speed, pitched up toward the eye like a console
-    // lip rather than standing vertical.
-    let bottom = panel(
-        commands,
-        meshes,
-        panel_materials,
-        images,
-        skin,
-        blank,
-        Vec2::new(0.98, 0.30),
-        Transform::from_xyz(0.0, -0.55, -1.72).with_rotation(Quat::from_rotation_x(0.46)),
-    );
-    // Top: contacts and standing, pitched down.
-    let top = panel(
-        commands,
-        meshes,
-        panel_materials,
-        images,
-        skin,
-        blank,
-        Vec2::new(0.86, 0.21),
-        Transform::from_xyz(0.0, 0.60, -1.9).with_rotation(Quat::from_rotation_x(-0.26)),
+        instrument_materials,
+        InstrumentKind::Reticle,
+        Vec2::splat(0.30),
+        Transform::from_xyz(0.0, 0.0, -1.88),
+        &|m| {
+            m.set_value(0.35); // brackets part-closed: no firing solution yet
+            m.set_thickness(0.030);
+        },
     );
 
-    condition(commands, left, &p);
-    nav(commands, right, &p);
-    throttle(commands, bottom, &p);
-    contacts(commands, top, &p);
-}
-
-#[allow(clippy::too_many_arguments)]
-fn panel(
-    commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<PanelMaterial>,
-    images: &mut Assets<Image>,
-    skin: SkinId,
-    blank: &Handle<Image>,
-    size: Vec2,
-    transform: Transform,
-) -> Entity {
-    spawn_panel(
+    // ---- lower left: radar plane ----
+    // Contacts spread above and below on purpose, so the stalks read.
+    let contacts = [
+        Contact {
+            plane: Vec2::new(0.35, 0.20),
+            elevation: 0.55,
+            kind: ContactKind::Neutral,
+        },
+        Contact {
+            plane: Vec2::new(-0.45, 0.40),
+            elevation: -0.62,
+            kind: ContactKind::Hostile,
+        },
+        Contact {
+            plane: Vec2::new(0.12, -0.55),
+            elevation: 0.18,
+            kind: ContactKind::Target,
+        },
+        Contact {
+            plane: Vec2::new(-0.20, -0.18),
+            elevation: -0.30,
+            kind: ContactKind::Neutral,
+        },
+        Contact {
+            plane: Vec2::new(0.62, -0.30),
+            elevation: 0.72,
+            kind: ContactKind::Neutral,
+        },
+    ];
+    instrument(
         commands,
         meshes,
-        materials,
+        instrument_materials,
+        InstrumentKind::Radar,
+        Vec2::new(0.64, 0.46),
+        Transform::from_xyz(-0.74, -0.42, -1.55).with_rotation(Quat::from_rotation_y(0.34)),
+        &move |m| {
+            m.set_thickness(0.016);
+            m.set_contacts(&contacts);
+        },
+    );
+
+    // ---- lower right: shield quadrants ----
+    instrument(
+        commands,
+        meshes,
+        instrument_materials,
+        InstrumentKind::Quadrant,
+        Vec2::splat(0.42),
+        Transform::from_xyz(0.80, -0.40, -1.55).with_rotation(Quat::from_rotation_y(-0.34)),
+        &|m| {
+            // Port shield down: one arc in the warning colour tells the story
+            // faster than four numbers ever could.
+            m.set_quadrants(0.92, 0.68, 0.80, 0.21);
+            m.set_thickness(0.055);
+        },
+    );
+
+    // ---- bottom centre: throttle tape and two arc gauges ----
+    instrument(
+        commands,
+        meshes,
+        instrument_materials,
+        InstrumentKind::Tape,
+        Vec2::new(0.20, 0.52),
+        Transform::from_xyz(-0.26, -0.44, -1.5).with_rotation(Quat::from_rotation_x(0.22)),
+        &|m| {
+            m.set_segments(14.0);
+            // Commanded 0.86, actual 0.62: the engines are still spooling.
+            m.set_throttle(0.62, (0.40, 0.70), 0.86);
+            m.set_thickness(0.030);
+        },
+    );
+    instrument(
+        commands,
+        meshes,
+        instrument_materials,
+        InstrumentKind::Arc,
+        Vec2::splat(0.32),
+        Transform::from_xyz(0.10, -0.46, -1.5).with_rotation(Quat::from_rotation_x(0.22)),
+        &|m| {
+            m.set_arc(0.60, 0.80, 10.0);
+            m.set_value(0.74);
+            m.set_thickness(0.026);
+        },
+    );
+    instrument(
+        commands,
+        meshes,
+        instrument_materials,
+        InstrumentKind::Arc,
+        Vec2::splat(0.28),
+        Transform::from_xyz(0.42, -0.50, -1.5).with_rotation(Quat::from_rotation_x(0.22)),
+        &|m| {
+            m.set_arc(0.60, 0.80, 8.0);
+            m.set_value(0.41);
+            m.set_thickness(0.024);
+        },
+    );
+
+    // ---- the two places a number really is the answer ----
+    let nav = spawn_panel(
+        commands,
+        meshes,
+        panel_materials,
         images,
-        &PanelDesc::default()
-            .size(size.x, size.y)
-            // 900 px/m rather than the 512 default: HUD panels are small in
-            // world units and sit close to the eye, so they need the density.
-            .resolution((size.x * 900.0) as u32, (size.y * 900.0) as u32),
+        &PanelDesc::default().size(0.52, 0.34).resolution(468, 306),
         skin,
         blank.clone(),
-        transform,
-    )
-    .ui_root
+        Transform::from_xyz(0.92, 0.32, -1.75).with_rotation(Quat::from_rotation_y(-0.40)),
+    );
+    let status = spawn_panel(
+        commands,
+        meshes,
+        panel_materials,
+        images,
+        &PanelDesc::default().size(0.52, 0.26).resolution(468, 234),
+        skin,
+        blank.clone(),
+        Transform::from_xyz(-0.92, 0.34, -1.75).with_rotation(Quat::from_rotation_y(0.40)),
+    );
+    nav_readout(commands, nav.ui_root, &p);
+    contacts_readout(commands, status.ui_root, &p);
 }
 
 fn column(commands: &mut Commands, root: Entity, build: impl FnOnce(&mut ChildSpawnerCommands)) {
@@ -106,7 +219,7 @@ fn column(commands: &mut Commands, root: Entity, build: impl FnOnce(&mut ChildSp
         panel
             .spawn(Node {
                 flex_direction: FlexDirection::Column,
-                padding: UiRect::all(Val::Px(30.0)),
+                padding: UiRect::all(Val::Px(26.0)),
                 width: Val::Percent(100.0),
                 ..default()
             })
@@ -114,76 +227,25 @@ fn column(commands: &mut Commands, root: Entity, build: impl FnOnce(&mut ChildSp
     });
 }
 
-fn rule(col: &mut ChildSpawnerCommands, p: &SkinParams) {
+fn heading(col: &mut ChildSpawnerCommands, p: &SkinParams, text: &str) {
+    let (text, accent) = (text.to_string(), p.accent);
+    col.spawn((
+        Text::new(text),
+        TextFont {
+            font_size: 29.0,
+            ..default()
+        },
+        TextColor(accent),
+    ));
     col.spawn((
         Node {
             width: Val::Percent(100.0),
             height: Val::Px(3.0),
-            margin: UiRect::vertical(Val::Px(9.0)),
+            margin: UiRect::vertical(Val::Px(8.0)),
             ..default()
         },
-        BackgroundColor(p.accent),
+        BackgroundColor(accent),
     ));
-}
-
-fn heading(col: &mut ChildSpawnerCommands, p: &SkinParams, text: &str) {
-    col.spawn((
-        Text::new(text.to_string()),
-        TextFont {
-            font_size: 30.0,
-            ..default()
-        },
-        TextColor(p.accent),
-    ));
-}
-
-/// A labelled gauge: track and fill, both geometry rather than characters.
-fn bar_row(col: &mut ChildSpawnerCommands, p: &SkinParams, label: &str, fill: f32) {
-    let (label, pct) = (label.to_string(), format!("{:.0}%", fill * 100.0));
-    let (dim, text, accent) = (p.dim_text, p.text, p.accent);
-    col.spawn(Node {
-        flex_direction: FlexDirection::Row,
-        justify_content: JustifyContent::SpaceBetween,
-        width: Val::Percent(100.0),
-        ..default()
-    })
-    .with_children(move |row| {
-        row.spawn((
-            Text::new(label),
-            TextFont {
-                font_size: 25.0,
-                ..default()
-            },
-            TextColor(dim),
-        ));
-        row.spawn((
-            Text::new(pct),
-            TextFont {
-                font_size: 25.0,
-                ..default()
-            },
-            TextColor(text),
-        ));
-    });
-    col.spawn((
-        Node {
-            width: Val::Percent(100.0),
-            height: Val::Px(16.0),
-            margin: UiRect::bottom(Val::Px(9.0)),
-            ..default()
-        },
-        BackgroundColor(dim.with_alpha(0.22)),
-    ))
-    .with_children(move |track| {
-        track.spawn((
-            Node {
-                width: Val::Percent(fill * 100.0),
-                height: Val::Percent(100.0),
-                ..default()
-            },
-            BackgroundColor(accent),
-        ));
-    });
 }
 
 fn key_value(col: &mut ChildSpawnerCommands, p: &SkinParams, key: &str, value: &str) {
@@ -193,14 +255,14 @@ fn key_value(col: &mut ChildSpawnerCommands, p: &SkinParams, key: &str, value: &
         flex_direction: FlexDirection::Row,
         justify_content: JustifyContent::SpaceBetween,
         width: Val::Percent(100.0),
-        margin: UiRect::bottom(Val::Px(7.0)),
+        margin: UiRect::bottom(Val::Px(6.0)),
         ..default()
     })
     .with_children(move |row| {
         row.spawn((
             Text::new(key),
             TextFont {
-                font_size: 25.0,
+                font_size: 23.0,
                 ..default()
             },
             TextColor(dim),
@@ -208,7 +270,7 @@ fn key_value(col: &mut ChildSpawnerCommands, p: &SkinParams, key: &str, value: &
         row.spawn((
             Text::new(value),
             TextFont {
-                font_size: 25.0,
+                font_size: 23.0,
                 ..default()
             },
             TextColor(text),
@@ -216,115 +278,60 @@ fn key_value(col: &mut ChildSpawnerCommands, p: &SkinParams, key: &str, value: &
     });
 }
 
-fn condition(commands: &mut Commands, root: Entity, p: &SkinParams) {
-    let p = *p;
-    column(commands, root, move |col| {
-        heading(col, &p, "CONDITION");
-        rule(col, &p);
-        bar_row(col, &p, "HULL", 0.86);
-        bar_row(col, &p, "SHIELD", 0.62);
-        bar_row(col, &p, "POWER", 0.94);
-    });
-}
-
-fn nav(commands: &mut Commands, root: Entity, p: &SkinParams) {
+fn nav_readout(commands: &mut Commands, root: Entity, p: &SkinParams) {
     let p = *p;
     column(commands, root, move |col| {
         heading(col, &p, "MERIDIAN");
-        rule(col, &p);
         key_value(col, &p, "GATE", "4.2 km");
         key_value(col, &p, "CARGO", "312 / 480");
         key_value(col, &p, "CREDITS", "128 400");
-        key_value(col, &p, "TARGET", "none");
     });
 }
 
-fn throttle(commands: &mut Commands, root: Entity, p: &SkinParams) {
+fn contacts_readout(commands: &mut Commands, root: Entity, p: &SkinParams) {
     let p = *p;
     column(commands, root, move |col| {
-        let (dim, text, accent) = (p.dim_text, p.text, p.accent);
-        col.spawn(Node {
-            flex_direction: FlexDirection::Row,
-            justify_content: JustifyContent::SpaceBetween,
-            align_items: AlignItems::FlexEnd,
-            width: Val::Percent(100.0),
-            ..default()
-        })
-        .with_children(move |row| {
-            row.spawn((
-                Text::new("212"),
-                TextFont {
-                    font_size: 62.0,
-                    ..default()
-                },
-                TextColor(text),
-            ));
-            row.spawn((
-                Text::new("m/s"),
-                TextFont {
-                    font_size: 26.0,
-                    ..default()
-                },
-                TextColor(dim),
-            ));
-            row.spawn((
-                Text::new("THR 78%    FUEL 64"),
-                TextFont {
-                    font_size: 26.0,
-                    ..default()
-                },
-                TextColor(dim),
-            ));
-        });
-        col.spawn((
-            Node {
-                width: Val::Percent(100.0),
-                height: Val::Px(18.0),
-                margin: UiRect::top(Val::Px(10.0)),
-                ..default()
-            },
-            BackgroundColor(dim.with_alpha(0.22)),
-        ))
-        .with_children(move |track| {
-            track.spawn((
-                Node {
-                    width: Val::Percent(78.0),
-                    height: Val::Percent(100.0),
-                    ..default()
-                },
-                BackgroundColor(accent),
-            ));
-        });
+        heading(col, &p, "PATROLLED");
+        key_value(col, &p, "CONTACTS", "5");
+        key_value(col, &p, "TARGET", "KESTREL");
     });
 }
 
-fn contacts(commands: &mut Commands, root: Entity, p: &SkinParams) {
-    let p = *p;
-    column(commands, root, move |col| {
-        let (text, accent) = (p.text, p.accent);
-        col.spawn(Node {
-            flex_direction: FlexDirection::Row,
-            justify_content: JustifyContent::SpaceBetween,
-            width: Val::Percent(100.0),
-            ..default()
-        })
-        .with_children(move |row| {
-            row.spawn((
-                Text::new("CONTACTS  3"),
-                TextFont {
-                    font_size: 27.0,
-                    ..default()
-                },
-                TextColor(text),
-            ));
-            row.spawn((
-                Text::new("PATROLLED SPACE"),
-                TextFont {
-                    font_size: 27.0,
-                    ..default()
-                },
-                TextColor(accent),
-            ));
-        });
-    });
+/// Drive the gauges from a clock so the mock reads as live instrumentation.
+/// Deterministic in time, so screenshots stay comparable between runs.
+pub fn animate_instruments(
+    time: Res<Time>,
+    mut materials: ResMut<Assets<InstrumentMaterial>>,
+    q: Query<(&MeshMaterial3d<InstrumentMaterial>, &Animated)>,
+) {
+    let t = time.elapsed_secs();
+    for (handle, animated) in &q {
+        let Some(m) = materials.get_mut(&handle.0) else {
+            continue;
+        };
+        match animated.kind {
+            InstrumentKind::Arc => {
+                m.set_value(0.5 + 0.35 * (t * 0.7).sin());
+            }
+            InstrumentKind::Tape => {
+                let speed = 0.55 + 0.32 * (t * 0.55).sin();
+                m.set_throttle(speed, (0.40, 0.70), 0.86);
+            }
+            InstrumentKind::Quadrant => {
+                // Port shield taking hits and recovering.
+                let port = (0.20 + 0.20 * (t * 1.3).sin()).max(0.05);
+                m.set_quadrants(0.92, 0.68, 0.80, port);
+            }
+            InstrumentKind::Reticle => {
+                // Brackets close as a firing solution converges.
+                m.set_value(0.5 + 0.5 * (t * 0.9).sin());
+            }
+            InstrumentKind::Ladder => {
+                m.set_value(0.05 * (t * 0.35).sin());
+            }
+            // The radar animates in its own shader (the sweep), and its
+            // contacts come from the world rather than from a clock.
+            InstrumentKind::Radar => {}
+        }
+    }
 }

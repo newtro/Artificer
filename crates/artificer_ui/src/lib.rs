@@ -35,9 +35,14 @@ use bevy::render::render_asset::RenderAssetUsages;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat, TextureUsages};
 use bevy::render::view::RenderLayers;
 
+mod instrument;
 mod material;
 mod skin;
 
+pub use instrument::{
+    Contact, ContactKind, InstrumentKind, InstrumentMaterial, INSTRUMENT_SHADER_HANDLE,
+    MAX_CONTACTS,
+};
 pub use material::{PanelMaterial, PANEL_SHADER_HANDLE};
 pub use skin::{Skin, SkinId, SkinParams, SkinRegistry, TexturedSkin, SHADER_MODE_TEXTURED};
 
@@ -157,9 +162,16 @@ impl Plugin for ArtificerUiPlugin {
             "shaders/panel.wgsl",
             Shader::from_wgsl
         );
+        load_internal_asset!(
+            app,
+            INSTRUMENT_SHADER_HANDLE,
+            "shaders/instrument.wgsl",
+            Shader::from_wgsl
+        );
         app.init_resource::<ActiveSkin>()
             .init_resource::<SkinRegistry>()
             .add_plugins(MaterialPlugin::<PanelMaterial>::default())
+            .add_plugins(MaterialPlugin::<InstrumentMaterial>::default())
             .add_systems(PreStartup, create_blank_texture)
             .add_systems(Update, restyle_panels);
     }
@@ -227,6 +239,14 @@ fn restyle_panels(
         material.set_selected(selected);
         material.set_opacity(opacity);
     }
+}
+
+/// A flat quad for an instrument, sized in metres.
+///
+/// Instruments are drawn entirely by their shader, so unlike a panel they
+/// need no render target, no camera and no UI tree — just geometry to draw on.
+pub fn instrument_quad(meshes: &mut Assets<Mesh>, size: Vec2) -> Handle<Mesh> {
+    meshes.add(curved_quad(size, 1, 0.0))
 }
 
 /// Build a panel: mesh, material, render target, and an isolated UI camera.
