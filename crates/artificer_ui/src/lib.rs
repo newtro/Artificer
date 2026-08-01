@@ -27,9 +27,11 @@
 //! assigns those to the game repository).
 
 use bevy::asset::load_internal_asset;
+use bevy::core_pipeline::bloom::Bloom;
+use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::pbr::{MaterialPlugin, NotShadowCaster, NotShadowReceiver};
 use bevy::prelude::*;
-use bevy::render::camera::RenderTarget;
+use bevy::render::camera::{ClearColorConfig, RenderTarget};
 use bevy::render::mesh::{Indices, PrimitiveTopology};
 use bevy::render::render_asset::RenderAssetUsages;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat, TextureUsages};
@@ -240,6 +242,51 @@ fn restyle_panels(
         material.set_opacity(opacity);
     }
 }
+
+/// Render layer for a pinned overlay: a HUD that must not move with the
+/// world camera.
+///
+/// The engine's own cameras carry no `RenderLayers` and so see only layer 0,
+/// which keeps anything on this layer out of the world pass entirely.
+pub const HUD_LAYER: usize = 30;
+
+/// Spawn a camera for a pinned overlay.
+///
+/// Anchoring HUD elements to the world camera every frame looks right
+/// standing still and wrong in motion — a chase camera lags and swings, and
+/// the whole HUD swims with it. An overlay gets its own camera that never
+/// moves, drawn after the world with no clear, so the result is rigid by
+/// construction instead of by keeping two transforms in sync.
+///
+/// Put overlay geometry on [`HUD_LAYER`] at fixed transforms in front of the
+/// origin, looking down -Z.
+pub fn spawn_hud_camera(commands: &mut Commands, fov_degrees: f32) -> Entity {
+    commands
+        .spawn((
+            Camera3d::default(),
+            Camera {
+                // After the world pass, and without clearing it.
+                order: 1,
+                clear_color: ClearColorConfig::None,
+                hdr: true,
+                ..default()
+            },
+            Projection::Perspective(PerspectiveProjection {
+                fov: fov_degrees.to_radians(),
+                ..default()
+            }),
+            Tonemapping::TonyMcMapface,
+            Bloom::NATURAL,
+            Transform::IDENTITY,
+            RenderLayers::layer(HUD_LAYER),
+            HudCamera,
+        ))
+        .id()
+}
+
+/// Marks the overlay camera, so a game can find or retune it later.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct HudCamera;
 
 /// A flat quad for an instrument, sized in metres.
 ///
