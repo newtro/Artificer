@@ -38,6 +38,12 @@ pub struct TexturedSkin {
     pub frame_selected: Option<Handle<Image>>,
     /// Body drawn behind the content.
     pub background: Option<Handle<Image>>,
+    /// Multiplier on the frame art's own colour.
+    ///
+    /// Separate from `params.accent` on purpose. White frame art wants
+    /// tinting to the accent; art that already carries its own palette wants
+    /// near-white here so its colours survive. One field cannot serve both.
+    pub frame_tint: Color,
     /// Fraction of the SOURCE texture that is border, per axis (0..0.5).
     /// A 512px frame with a 128px border is 0.25.
     pub source_border: Vec2,

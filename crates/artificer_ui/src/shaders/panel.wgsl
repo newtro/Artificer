@@ -25,6 +25,8 @@ struct PanelParams {
     c: vec4<f32>,
     // x,y source border fraction; z,w panel border fraction (nine-slice)
     d: vec4<f32>,
+    // frame art tint (rgb)
+    e: vec4<f32>,
 };
 
 @group(2) @binding(0) var<uniform> params: PanelParams;
@@ -180,7 +182,9 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         acc = mix(acc, content.rgb * emissive, content.a);
         acc_a = clamp(acc_a + content.a, 0.0, 1.0);
 
-        let frame_rgb = frame.rgb * params.accent.rgb * (1.0 + selected * 0.6);
+        // Tinted by `e`, not by the accent: coloured frame art must keep its
+        // own palette while the accent still drives rules and highlights.
+        let frame_rgb = frame.rgb * params.e.rgb * (1.0 + selected * 0.6);
         acc = mix(acc, frame_rgb, frame.a);
         acc_a = clamp(acc_a + frame.a, 0.0, 1.0);
 

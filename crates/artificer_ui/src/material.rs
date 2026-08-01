@@ -38,6 +38,9 @@ pub struct PanelMaterial {
     /// x,y source border fraction; z,w panel border fraction (nine-slice)
     #[uniform(0)]
     pub d: Vec4,
+    /// Frame art tint (rgb) -- independent of the UI accent.
+    #[uniform(0)]
+    pub e: Vec4,
     #[texture(1)]
     #[sampler(2)]
     pub content: Handle<Image>,
@@ -62,6 +65,7 @@ impl PanelMaterial {
             b: Vec4::ZERO,
             c: Vec4::ZERO,
             d: Vec4::ZERO,
+            e: Vec4::ONE,
             content,
             frame: blank.clone(),
             backdrop_tex: blank,
@@ -81,6 +85,8 @@ impl PanelMaterial {
             skin.panel_border.x,
             skin.panel_border.y,
         );
+        let t = skin.frame_tint.to_srgba();
+        self.e = Vec4::new(t.red, t.green, t.blue, t.alpha);
         let frame = match (selected, &skin.frame_selected) {
             (true, Some(sel)) => sel.clone(),
             _ => skin.frame.clone(),

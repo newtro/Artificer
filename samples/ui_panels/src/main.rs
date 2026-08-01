@@ -26,10 +26,57 @@ struct ShotRequest {
 }
 
 fn arg(name: &str) -> Option<String> {
+    args_all(name).into_iter().next()
+}
+
+/// Every value given for a repeated flag, so `--skin-dir a --skin-dir b`
+/// puts both art skins in the same cycle for side-by-side comparison.
+fn args_all(name: &str) -> Vec<String> {
     let args: Vec<String> = std::env::args().collect();
     args.iter()
-        .position(|a| a == name)
-        .and_then(|i| args.get(i + 1).cloned())
+        .enumerate()
+        .filter(|(_, a)| *a == name)
+        .filter_map(|(i, _)| args.get(i + 1).cloned())
+        .collect()
+}
+
+/// Per-directory styling. The art decides: white frames want the accent,
+/// coloured frames want to be left alone.
+struct SkinStyle {
+    accent: Color,
+    backdrop: Color,
+    frame_tint: Color,
+    source_border: Vec2,
+    panel_border: Vec2,
+    content_inset: Vec2,
+    emissive: f32,
+}
+
+fn style_for(dir: &str) -> SkinStyle {
+    if dir.to_lowercase().contains("scifi") {
+        // Teal-and-gold bulkhead art, 1024px, border 126x161 with corner
+        // brackets reaching further in than the edge struts.
+        SkinStyle {
+            accent: Color::srgb(0.45, 0.80, 0.95),
+            backdrop: Color::srgb(0.035, 0.055, 0.075),
+            frame_tint: Color::srgb(1.0, 1.0, 1.0),
+            source_border: Vec2::splat(0.20),
+            panel_border: Vec2::new(0.10, 0.15),
+            content_inset: Vec2::new(0.10, 0.15),
+            emissive: 1.9,
+        }
+    } else {
+        // Near-white chamfered bevel, 512px, bevel x=39..92, chamfer to 84.
+        SkinStyle {
+            accent: Color::srgb(0.62, 0.86, 1.0),
+            backdrop: Color::srgb(0.045, 0.06, 0.085),
+            frame_tint: Color::srgb(0.62, 0.86, 1.0),
+            source_border: Vec2::splat(0.20),
+            panel_border: Vec2::new(0.085, 0.13),
+            content_inset: Vec2::new(0.075, 0.11),
+            emissive: 1.9,
+        }
+    }
 }
 
 fn skin_from_args() -> Skin {
@@ -71,22 +118,21 @@ fn load_skin_dir(
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "Textured".to_string());
+    let st = style_for(dir);
     Some(registry.register(TexturedSkin {
         name,
         frame,
         frame_selected,
         background,
-        // Measured off the art: the bevel runs x=39..92 of 512 and the
-        // corner chamfer reaches 84px, so 0.20 covers the whole corner tile.
-        source_border: Vec2::splat(0.20),
-        // Held near-square on the panel so the chamfers do not stretch.
-        panel_border: Vec2::new(0.085, 0.13),
+        frame_tint: st.frame_tint,
+        source_border: st.source_border,
+        panel_border: st.panel_border,
         params: artificer_ui::SkinParams {
-            accent: Color::srgb(0.62, 0.86, 1.0),
+            accent: st.accent,
             text: Color::srgb(0.95, 0.97, 1.0),
             dim_text: Color::srgb(0.55, 0.63, 0.72),
-            backdrop: Color::srgb(0.045, 0.06, 0.085),
-            emissive: 1.9,
+            backdrop: st.backdrop,
+            emissive: st.emissive,
             backdrop_opacity: 1.0,
             scanline_strength: 0.0,
             edge_glow: 0.45,
@@ -94,8 +140,7 @@ fn load_skin_dir(
             bezel: 0.0,
             curvature: 0.0,
             corner_radius: 0.0,
-            // Clear of the bevel, measured from the same numbers.
-            content_inset: Vec2::new(0.075, 0.11),
+            content_inset: st.content_inset,
         },
     }))
 }
@@ -233,7 +278,7 @@ fn setup(
         &mut meshes,
         &mut panel_materials,
         &mut images,
-        &PanelDesc::default().size(1.7, 1.0),
+        &PanelDesc::default().size(1.75, 1.15),
         skin,
         blank.0.clone(),
         Transform::from_xyz(0.0, 0.45, 0.0),
@@ -318,7 +363,7 @@ fn build_catalogue(commands: &mut Commands, root: Entity, p: &artificer_ui::Skin
                 col.spawn((
                     Text::new("SHIPYARD"),
                     TextFont {
-                        font_size: 46.0,
+                        font_size: 40.0,
                         ..default()
                     },
                     TextColor(p.accent),
@@ -347,7 +392,7 @@ fn build_catalogue(commands: &mut Commands, root: Entity, p: &artificer_ui::Skin
                             flex_direction: FlexDirection::Row,
                             justify_content: JustifyContent::SpaceBetween,
                             width: Val::Percent(100.0),
-                            padding: UiRect::axes(Val::Px(10.0), Val::Px(7.0)),
+                            padding: UiRect::axes(Val::Px(10.0), Val::Px(4.0)),
                             ..default()
                         },
                         BackgroundColor(if selected {
@@ -360,7 +405,7 @@ fn build_catalogue(commands: &mut Commands, root: Entity, p: &artificer_ui::Skin
                         row.spawn((
                             Text::new(*name),
                             TextFont {
-                                font_size: 26.0,
+                                font_size: 23.0,
                                 ..default()
                             },
                             TextColor(if selected { p.accent } else { p.text }),
