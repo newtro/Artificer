@@ -30,6 +30,13 @@ pub struct RenderConfig {
     pub vsync: bool,
     /// CSS selector of the canvas to attach to on web (e.g. "#game-canvas").
     pub canvas: Option<String>,
+    /// Where the game's assets live.
+    ///
+    /// `None` uses Bevy's default, which resolves relative to the executable
+    /// — right for a shipped build, wrong for `cargo run` out of a workspace
+    /// whose target directory is somewhere else entirely. Games that keep
+    /// assets beside their source set this.
+    pub assets_dir: Option<String>,
 }
 
 impl Default for RenderConfig {
@@ -40,6 +47,7 @@ impl Default for RenderConfig {
             height: 720.0,
             vsync: true,
             canvas: None,
+            assets_dir: None,
         }
     }
 }
@@ -127,7 +135,7 @@ pub(crate) struct FrameInfo {
 /// Build and run the windowed application. Blocks until exit.
 pub fn run_app(config: RenderConfig, game: impl GameClient) {
     let mut app = App::new();
-    app.add_plugins(DefaultPlugins.set(WindowPlugin {
+    let mut plugins = DefaultPlugins.set(WindowPlugin {
         primary_window: Some(Window {
             title: config.title.clone(),
             resolution: (config.width, config.height).into(),
@@ -142,7 +150,14 @@ pub fn run_app(config: RenderConfig, game: impl GameClient) {
             ..Default::default()
         }),
         ..Default::default()
-    }));
+    });
+    if let Some(dir) = &config.assets_dir {
+        plugins = plugins.set(bevy::asset::AssetPlugin {
+            file_path: dir.clone(),
+            ..Default::default()
+        });
+    }
+    app.add_plugins(plugins);
 
     game.register_bevy(&mut app);
 
