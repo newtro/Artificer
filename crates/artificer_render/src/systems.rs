@@ -421,7 +421,15 @@ pub(crate) fn sync_active_camera(
         .active_camera
         .and_then(|id| maps.camera_nodes.get(&id))
         .copied();
+    // Only the cameras this adapter created. A game may legitimately own
+    // others — a pinned HUD pass, a render-target camera behind a world-space
+    // UI panel — and switching those off every frame because they are not the
+    // scene's active camera makes them impossible to use at all.
+    let owned: std::collections::HashSet<Entity> = maps.camera_nodes.values().copied().collect();
     for (entity, mut camera, is_ui_default) in cameras.iter_mut() {
+        if !owned.contains(&entity) {
+            continue;
+        }
         let want = Some(entity) == active_entity;
         if camera.is_active != want {
             camera.is_active = want;
