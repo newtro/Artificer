@@ -6,6 +6,8 @@
 //!
 //! SPACE cycles the skin. LEFT/RIGHT orbits. ESC exits.
 
+mod hud;
+
 use artificer_ui::{
     spawn_panel, ActiveSkin, ArtificerUiPlugin, BlankTexture, PanelDesc, PanelMaterial, Skin,
     SkinId, SkinRegistry, TexturedSkin,
@@ -196,6 +198,22 @@ fn take_shot(
 #[derive(Component)]
 struct Prop;
 
+/// Which mock scene to build.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Layout {
+    /// Three panels in an arc: judging the panel material itself.
+    Gallery,
+    /// A cockpit HUD wrapped around the viewer: judging it as a HUD.
+    Hud,
+}
+
+fn layout_from_args() -> Layout {
+    match arg("--layout").unwrap_or_default().to_lowercase().as_str() {
+        "hud" => Layout::Hud,
+        _ => Layout::Gallery,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn setup(
     mut commands: Commands,
@@ -207,6 +225,16 @@ fn setup(
     mut active: ResMut<ActiveSkin>,
     blank: Res<BlankTexture>,
 ) {
+    let layout = layout_from_args();
+    // A HUD is seen from inside the ship: the eye sits at the origin looking
+    // down -Z, which is where the panels are arranged around. Viewing it from
+    // the gallery position would show the cockpit from outside.
+    let cam_transform = match layout {
+        Layout::Hud => Transform::IDENTITY,
+        Layout::Gallery => {
+            Transform::from_xyz(0.0, 0.9, 4.2).looking_at(Vec3::new(0.0, 0.35, 0.0), Vec3::Y)
+        }
+    };
     commands.spawn((
         Camera3d::default(),
         Camera {
@@ -215,7 +243,7 @@ fn setup(
         },
         Tonemapping::TonyMcMapface,
         Bloom::NATURAL,
-        Transform::from_xyz(0.0, 0.9, 4.2).looking_at(Vec3::new(0.0, 0.35, 0.0), Vec3::Y),
+        cam_transform,
     ));
 
     // Key light plus a cool fill, so the Industrial bezel has something to
@@ -238,38 +266,106 @@ fn setup(
         Transform::from_xyz(-4.0, 1.5, 3.0),
     ));
 
-    // A solid object among the panels: proves they occupy the same space and
-    // are not an overlay.
-    commands.spawn((
-        Mesh3d(meshes.add(Torus::new(0.28, 0.42))),
-        MeshMaterial3d(std_materials.add(StandardMaterial {
-            base_color: Color::srgb(0.35, 0.38, 0.45),
-            metallic: 0.9,
-            perceptual_roughness: 0.25,
-            ..default()
-        })),
-        Transform::from_xyz(0.0, 0.35, -0.9),
-        Prop,
-    ));
-    // Floor, to catch the panels' glow and give the scene a ground.
-    commands.spawn((
-        Mesh3d(meshes.add(Plane3d::default().mesh().size(40.0, 40.0))),
-        MeshMaterial3d(std_materials.add(StandardMaterial {
-            base_color: Color::srgb(0.03, 0.035, 0.05),
-            perceptual_roughness: 0.4,
-            metallic: 0.6,
-            ..default()
-        })),
-        Transform::from_xyz(0.0, -0.75, 0.0),
-    ));
+    let hull = std_materials.add(StandardMaterial {
+        base_color: Color::srgb(0.35, 0.38, 0.45),
+        metallic: 0.9,
+        perceptual_roughness: 0.25,
+        ..default()
+    });
+    match layout {
+        Layout::Gallery => {
+            // A solid object among the panels: proves they occupy the same
+            // space and are not an overlay.
+            commands.spawn((
+                Mesh3d(meshes.add(Torus::new(0.28, 0.42))),
+                MeshMaterial3d(hull),
+                Transform::from_xyz(0.0, 0.35, -0.9),
+                Prop,
+            ));
+            // Floor, to catch the panels' glow and give the scene a ground.
+            commands.spawn((
+                Mesh3d(meshes.add(Plane3d::default().mesh().size(40.0, 40.0))),
+                MeshMaterial3d(std_materials.add(StandardMaterial {
+                    base_color: Color::srgb(0.03, 0.035, 0.05),
+                    perceptual_roughness: 0.4,
+                    metallic: 0.6,
+                    ..default()
+                })),
+                Transform::from_xyz(0.0, -0.75, 0.0),
+            ));
+        }
+        Layout::Hud => {
+            // Something to fly toward, far enough ahead that it reads as
+            // distance rather than as an object on the dashboard.
+            commands.spawn((
+                Mesh3d(meshes.add(Torus::new(2.6, 4.0))),
+                MeshMaterial3d(hull),
+                Transform::from_xyz(1.5, 0.4, -26.0)
+                    .with_rotation(Quat::from_rotation_x(1.15) * Quat::from_rotation_z(0.3)),
+                Prop,
+            ));
+            // A scatter of distant marks so the view is not empty black.
+            let star = std_materials.add(StandardMaterial {
+                base_color: Color::BLACK,
+                emissive: LinearRgba::rgb(3.0, 3.4, 4.2),
+                unlit: true,
+                ..default()
+            });
+            let star_mesh = meshes.add(Sphere::new(0.16));
+            let mut seed = 0x2545_F491_4F6C_DD1Du64;
+            for _ in 0..90 {
+                // Deterministic scatter: a screenshot must not change between
+                // runs, so no wall-clock or thread-local randomness.
+                let mut next = || {
+                    seed ^= seed << 13;
+                    seed ^= seed >> 7;
+                    seed ^= seed << 17;
+                    (seed >> 11) as f32 / (1u64 << 53) as f32
+                };
+                let (a, b, r) = (next(), next(), 22.0 + next() * 26.0);
+                let theta = a * std::f32::consts::TAU;
+                let phi = (b - 0.5) * 1.2;
+                commands.spawn((
+                    Mesh3d(star_mesh.clone()),
+                    MeshMaterial3d(star.clone()),
+                    Transform::from_xyz(
+                        theta.sin() * r * 0.6,
+                        phi * r * 0.35,
+                        -r * (0.6 + 0.4 * theta.cos().abs()),
+                    ),
+                ));
+            }
+        }
+    }
 
-    // A directory skin wins when one is given, so `--skin-dir` previews art.
-    let skin = match arg("--skin-dir").and_then(|d| load_skin_dir(&d, &mut images, &mut registry)) {
-        Some(id) => id,
-        None => SkinId::Builtin(skin_from_args()),
-    };
+    // Every `--skin-dir` joins the cycle; the first becomes active so a
+    // screenshot run lands on art rather than on a built-in.
+    let mut first_art: Option<SkinId> = None;
+    for dir in args_all("--skin-dir") {
+        match load_skin_dir(&dir, &mut images, &mut registry) {
+            Some(id) => {
+                first_art.get_or_insert(id);
+            }
+            None => warn!("could not load skin dir {dir}"),
+        }
+    }
+    let skin = first_art.unwrap_or(SkinId::Builtin(skin_from_args()));
     active.0 = skin;
     let skin_name = registry.name(skin);
+
+    if layout == Layout::Hud {
+        hud::build_hud(
+            &mut commands,
+            &mut meshes,
+            &mut panel_materials,
+            &mut images,
+            &registry,
+            skin,
+            &blank.0,
+        );
+        spawn_labels(&mut commands, &skin_name);
+        return;
+    }
 
     // Three panels in a shallow arc, the way a cockpit or a shipyard bay
     // would actually place them around the player.
@@ -309,8 +405,12 @@ fn setup(
     build_readout(&mut commands, left.ui_root, &p, "SYSTEMS");
     build_readout(&mut commands, right.ui_root, &p, "CARGO");
 
-    // Ordinary screen-space label, so you can tell which skin you are looking
-    // at. This one is intentionally NOT a panel.
+    spawn_labels(&mut commands, &skin_name);
+}
+
+/// Screen-space help and the active-skin readout. Deliberately NOT panels:
+/// they label the demo, they are not part of what is being judged.
+fn spawn_labels(commands: &mut Commands, skin_name: &str) {
     commands.spawn((
         Text::new("SPACE cycle skin    ←/→ orbit    ESC quit"),
         TextFont {
@@ -516,10 +616,24 @@ fn orbit_camera(
         return;
     }
     orbit.angle += dir * time.delta_secs() * 0.8;
-    let radius = 4.3;
-    for mut t in &mut cam {
-        *t = Transform::from_xyz(orbit.angle.sin() * radius, 0.9, orbit.angle.cos() * radius)
-            .looking_at(Vec3::new(0.0, 0.35, 0.0), Vec3::Y);
+    match layout_from_args() {
+        // From the pilot's seat you turn your head; you do not orbit yourself.
+        Layout::Hud => {
+            for mut t in &mut cam {
+                *t = Transform::from_rotation(Quat::from_rotation_y(-orbit.angle * 0.35));
+            }
+        }
+        Layout::Gallery => {
+            let radius = 4.3;
+            for mut t in &mut cam {
+                *t = Transform::from_xyz(
+                    orbit.angle.sin() * radius,
+                    0.9,
+                    orbit.angle.cos() * radius,
+                )
+                .looking_at(Vec3::new(0.0, 0.35, 0.0), Vec3::Y);
+            }
+        }
     }
 }
 
