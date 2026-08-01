@@ -1,0 +1,12 @@
+[package]
+name = "artificer_ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+artificer_render = { workspace = true }
+bevy = { workspace = true }
+glam = { workspace = true }
+log = { workspace = true }

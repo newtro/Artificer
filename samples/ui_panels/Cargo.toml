@@ -1,0 +1,11 @@
+[package]
+name = "ui_panels"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+artificer_render = { workspace = true }
+artificer_ui = { workspace = true }
+bevy = { workspace = true }

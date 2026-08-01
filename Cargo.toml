@@ -8,11 +8,13 @@ members = [
     "crates/artificer_assets",
     "crates/artificer_assets_import",
     "crates/artificer_render",
+    "crates/artificer_ui",
     "crates/artificer_net",
     "crates/artificer_agent",
     "crates/artificer_testkit",
     "samples/minimal",
     "samples/asset_import",
+    "samples/ui_panels",
 ]
 
 [workspace.package]
@@ -29,6 +31,7 @@ artificer_input = { path = "crates/artificer_input" }
 artificer_assets = { path = "crates/artificer_assets" }
 artificer_assets_import = { path = "crates/artificer_assets_import" }
 artificer_render = { path = "crates/artificer_render" }
+artificer_ui = { path = "crates/artificer_ui" }
 artificer_net = { path = "crates/artificer_net" }
 artificer_agent = { path = "crates/artificer_agent" }
 artificer_testkit = { path = "crates/artificer_testkit" }
