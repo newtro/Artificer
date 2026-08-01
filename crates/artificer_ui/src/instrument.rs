@@ -165,6 +165,16 @@ impl InstrumentMaterial {
         self
     }
 
+    /// Overall opacity, 0..1.
+    ///
+    /// The pitch ladder in particular wants to sit well back: it spans the
+    /// middle of the view, and at full strength it competes with the thing
+    /// you are trying to aim at.
+    pub fn set_opacity(&mut self, opacity: f32) -> &mut Self {
+        self.tint.w = opacity.clamp(0.0, 1.0);
+        self
+    }
+
     pub fn set_glow(&mut self, glow: f32) -> &mut Self {
         self.c.x = glow.max(0.0);
         self
@@ -313,6 +323,15 @@ mod tests {
         }]);
         assert_eq!(m.contacts[0].z, -0.8, "below must stay below");
         assert_eq!(m.contacts[0].y, -0.2);
+    }
+
+    #[test]
+    fn opacity_rides_on_the_tint_alpha_the_shader_multiplies_by() {
+        let mut m = mat(InstrumentKind::Ladder);
+        m.set_opacity(0.3);
+        assert_eq!(m.tint.w, 0.3);
+        m.set_opacity(5.0);
+        assert_eq!(m.tint.w, 1.0, "clamped");
     }
 
     #[test]

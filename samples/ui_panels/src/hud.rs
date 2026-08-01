@@ -74,6 +74,9 @@ pub fn build_hud(
         &|m| {
             m.set_thickness(0.010);
             m.set_glow(0.05);
+            // Well back: the ladder crosses the middle of the view and must
+            // not compete with whatever you are aiming at.
+            m.set_opacity(0.30);
         },
     );
     instrument(
