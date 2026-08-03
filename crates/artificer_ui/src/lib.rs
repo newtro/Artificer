@@ -37,6 +37,8 @@ use bevy::render::render_asset::RenderAssetUsages;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat, TextureUsages};
 use bevy::render::view::RenderLayers;
 
+pub mod drag;
+pub mod hit;
 mod instrument;
 mod material;
 mod skin;

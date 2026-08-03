@@ -6,6 +6,7 @@
 //! Because the command stream is serializable, scene evolution can be
 //! recorded and replayed for visual regression testing.
 
+pub mod framing;
 mod mesh;
 mod types;
 
