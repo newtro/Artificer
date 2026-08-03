@@ -31,7 +31,18 @@ pub const PACK_MAGIC: [u8; 4] = *b"ARTP";
 
 /// Bumped whenever the pack layout changes in a way older readers cannot
 /// handle. A pack that disagrees is rejected rather than misread.
-pub const PACK_FORMAT_VERSION: u16 = 1;
+/// Bumped whenever the serialized layout changes.
+///
+/// v2 added `MaterialDesc::casts_shadows`. Postcard is positional, so a v1
+/// reader handed v2 bytes does not fail cleanly -- it misreads every field
+/// after that point. This gate is the only thing between a stale pack and
+/// nonsense geometry, which is exactly what happened during development: the
+/// game silently fell back to primitives until the pack was rebaked.
+///
+/// v3 added the normal, metallic-roughness and occlusion maps, to
+/// `MaterialDesc` and to `PackedMaterial`. Both are positional, so the same
+/// rule applies: every pack must be rebaked.
+pub const PACK_FORMAT_VERSION: u16 = 3;
 
 /// The eight bytes every PNG starts with.
 const PNG_SIGNATURE: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
@@ -84,6 +95,20 @@ pub struct PackedMaterial {
     pub id: String,
     pub desc: MaterialDesc,
     pub base_color_texture: Option<String>,
+    /// Tangent-space normal map, by [`TextureBlob::id`].
+    ///
+    /// Held beside the base colour rather than inside `desc` for the same
+    /// reason that one is: the pack names textures with STRINGS and the
+    /// loader turns them into handles, so a bake never has to invent id
+    /// numbers that would differ between runs.
+    #[serde(default)]
+    pub normal_texture: Option<String>,
+    /// Combined metallic-roughness map (glTF packing: roughness G, metallic B).
+    #[serde(default)]
+    pub metallic_roughness_texture: Option<String>,
+    /// Baked ambient occlusion (R).
+    #[serde(default)]
+    pub occlusion_texture: Option<String>,
 }
 
 /// One material's slice of an asset's index buffer.
@@ -504,15 +529,65 @@ impl AssetPack {
                     message: problem,
                 });
             }
-            if let Some(texture) = &material.base_color_texture {
+            // EVERY slot, not just base colour. A dangling normal map does
+            // not fail loudly at runtime -- it warns once and the surface
+            // renders flat, which is indistinguishable from never having
+            // authored one. Catching it here makes a typo a bake failure.
+            for (slot, what) in [
+                (&material.base_color_texture, "texture"),
+                (&material.normal_texture, "normal texture"),
+                (
+                    &material.metallic_roughness_texture,
+                    "metallic-roughness texture",
+                ),
+                (&material.occlusion_texture, "occlusion texture"),
+            ] {
+                let Some(texture) = slot else { continue };
                 if self.texture(texture).is_none() {
                     issues.push(ValidationIssue {
                         asset_id: material.id.clone(),
-                        message: format!("references missing texture '{texture}'"),
+                        message: format!("references missing {what} '{texture}'"),
                     });
                 }
             }
         }
+        // A texture cannot be both colour and data. Colour space is fixed
+        // when the image is decoded, and one blob yields one decode, so a
+        // page used as base colour by one material and as a normal map by
+        // another would silently corrupt whichever role lost. Refuse it here
+        // instead: the fix is to bake the same bytes under two ids.
+        {
+            let mut as_color: Vec<&str> = Vec::new();
+            let mut as_data: Vec<&str> = Vec::new();
+            for material in &self.materials {
+                if let Some(id) = &material.base_color_texture {
+                    as_color.push(id);
+                }
+                for slot in [
+                    &material.normal_texture,
+                    &material.metallic_roughness_texture,
+                    &material.occlusion_texture,
+                ]
+                .into_iter()
+                .flatten()
+                {
+                    as_data.push(slot);
+                }
+            }
+            as_data.sort_unstable();
+            as_data.dedup();
+            for id in as_data {
+                if as_color.contains(&id) {
+                    issues.push(ValidationIssue {
+                        asset_id: "<pack>".into(),
+                        message: format!(
+                            "texture '{id}' is used as BOTH base colour and a data map;                              colour space is fixed per texture, so bake it under two ids"
+                        ),
+                    });
+                }
+            }
+        }
+
         for texture in &self.textures {
             if texture.id.trim().is_empty() {
                 issues.push(ValidationIssue {
@@ -643,7 +718,50 @@ pub fn material_for(
                 roughness: 0.75,
                 ..Default::default()
             };
-            register(pack, id, desc, Some(texture.clone()))
+            register(
+                pack,
+                id,
+                desc,
+                MaterialTextures::base(Some(texture.clone())),
+            )
+        }
+        MaterialMapping::Pbr {
+            base_color,
+            normal,
+            metallic_roughness,
+            occlusion,
+        } => {
+            // Keyed on the WHOLE set, not just base colour: two assets that
+            // share a colour page but carry different normal maps are
+            // different materials, and collapsing them would paint one hull
+            // with another's relief.
+            let key = [
+                base_color.as_str(),
+                normal.as_deref().unwrap_or("-"),
+                metallic_roughness.as_deref().unwrap_or("-"),
+                occlusion.as_deref().unwrap_or("-"),
+            ]
+            .join("+");
+            let id = format!("pbr.{key}");
+            let desc = MaterialDesc {
+                base_color: [1.0, 1.0, 1.0, 1.0],
+                // Unit scalars: the maps carry the variation, and a non-unit
+                // multiplier here would quietly darken every generated asset.
+                metallic: 1.0,
+                roughness: 1.0,
+                ..Default::default()
+            };
+            register(
+                pack,
+                id,
+                desc,
+                MaterialTextures {
+                    base_color: Some(base_color.clone()),
+                    normal: normal.clone(),
+                    metallic_roughness: metallic_roughness.clone(),
+                    occlusion: occlusion.clone(),
+                },
+            )
         }
         MaterialMapping::Override(desc) => {
             let id = if slot.is_empty() {
@@ -651,7 +769,7 @@ pub fn material_for(
             } else {
                 format!("mat.{asset_id}.{slot}")
             };
-            register(pack, id, **desc, None)
+            register(pack, id, **desc, MaterialTextures::default())
         }
     }
 }
@@ -664,14 +782,42 @@ pub fn material_for(
 /// collision is DETECTED: reusing an id with a different description is an
 /// error instead of silently discarding one of them (which would also make
 /// the baked bytes depend on encounter order).
+/// Every texture slot of one material, by [`TextureBlob::id`].
+///
+/// Passed as a group so a new map cannot be added to the pack and then
+/// forgotten in the conflict check below -- two materials differing only in
+/// their normal map would otherwise be treated as identical and silently
+/// share one entry.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MaterialTextures {
+    pub base_color: Option<String>,
+    pub normal: Option<String>,
+    pub metallic_roughness: Option<String>,
+    pub occlusion: Option<String>,
+}
+
+impl MaterialTextures {
+    pub fn base(texture: Option<String>) -> Self {
+        Self {
+            base_color: texture,
+            ..Default::default()
+        }
+    }
+}
+
 fn register(
     pack: &mut AssetPack,
     id: String,
     desc: MaterialDesc,
-    texture: Option<String>,
+    textures: MaterialTextures,
 ) -> Result<Option<String>, PackError> {
     if let Some(existing) = pack.materials.iter().find(|m| m.id == id) {
-        if existing.desc != desc || existing.base_color_texture != texture {
+        let same = existing.desc == desc
+            && existing.base_color_texture == textures.base_color
+            && existing.normal_texture == textures.normal
+            && existing.metallic_roughness_texture == textures.metallic_roughness
+            && existing.occlusion_texture == textures.occlusion;
+        if !same {
             return Err(PackError::MaterialConflict { id });
         }
         return Ok(Some(id));
@@ -679,7 +825,10 @@ fn register(
     pack.materials.push(PackedMaterial {
         id: id.clone(),
         desc,
-        base_color_texture: texture,
+        base_color_texture: textures.base_color,
+        normal_texture: textures.normal,
+        metallic_roughness_texture: textures.metallic_roughness,
+        occlusion_texture: textures.occlusion,
     });
     Ok(Some(id))
 }
@@ -1131,6 +1280,9 @@ mod tests {
             id: "atlas.present".into(),
             desc: MaterialDesc::default(),
             base_color_texture: Some("tex.missing".into()),
+            normal_texture: None,
+            metallic_roughness_texture: None,
+            occlusion_texture: None,
         });
         let issues = pack.validate();
         assert!(issues
@@ -1172,6 +1324,9 @@ mod tests {
                 id: id.into(),
                 desc: MaterialDesc::default(),
                 base_color_texture: None,
+                normal_texture: None,
+                metallic_roughness_texture: None,
+                occlusion_texture: None,
             });
         }
         assert_eq!(pack.validate(), vec![]);
@@ -1320,6 +1475,9 @@ mod tests {
                 ..Default::default()
             },
             base_color_texture: None,
+            normal_texture: None,
+            metallic_roughness_texture: None,
+            occlusion_texture: None,
         });
         assert!(pack
             .validate()
@@ -1421,6 +1579,9 @@ mod tests {
                     id: id.into(),
                     desc: MaterialDesc::default(),
                     base_color_texture: None,
+                    normal_texture: None,
+                    metallic_roughness_texture: None,
+                    occlusion_texture: None,
                 });
             }
             pack

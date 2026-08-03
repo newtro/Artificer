@@ -1,7 +1,8 @@
 //! artificer_scene -> Bevy type conversions.
 
 use artificer_scene::{
-    AlphaModeDesc, MaterialDesc, MeshData, TextureSampling, ToneMapDesc, TransformDesc,
+    AlphaModeDesc, MaterialDesc, MeshData, TextureColorSpace, TextureSampling, ToneMapDesc,
+    TransformDesc,
 };
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::prelude::*;
@@ -26,6 +27,25 @@ pub(crate) fn to_bevy_mesh(data: &MeshData) -> Mesh {
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, data.normals.clone());
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, data.uvs.clone());
     mesh.insert_indices(Indices::U32(data.indices.clone()));
+
+    // TANGENTS, or normal maps do nothing.
+    //
+    // A tangent-space normal map is expressed relative to a per-vertex
+    // tangent frame. With no `ATTRIBUTE_TANGENT` Bevy's PBR shader compiles
+    // without its normal-mapping branch and simply IGNORES the bound map --
+    // no warning, no error, and the surface still renders. That is exactly
+    // how a 4K normal map gets baked into a pack, bound to a material, and
+    // never once affects a pixel while everything appears to work.
+    //
+    // Generated here rather than at bake time because mikktspace needs the
+    // final positions, normals, UVs and indices together, which is what this
+    // function has. Meshes without UVs (untextured primitives) are skipped:
+    // they cannot carry a normal map, and generation would fail on them.
+    if !data.uvs.is_empty() && !data.normals.is_empty() {
+        if let Err(e) = mesh.generate_tangents() {
+            log::warn!("could not generate tangents ({e:?}); normal maps will be ignored");
+        }
+    }
     mesh
 }
 
@@ -38,13 +58,17 @@ pub(crate) fn to_bevy_mesh(data: &MeshData) -> Mesh {
 pub(crate) fn decode_texture(
     png: &[u8],
     sampling: TextureSampling,
+    color_space: TextureColorSpace,
 ) -> Result<Image, bevy::image::TextureError> {
     let mut image = Image::from_buffer(
         png,
         bevy::image::ImageType::Extension("png"),
         bevy::image::CompressedImageFormats::NONE,
-        // Base-colour textures are authored in sRGB.
-        true,
+        // Colour is gamma-encoded; a normal, metallic-roughness or occlusion
+        // map is NOT, and decoding one as sRGB bends its values through a
+        // gamma curve. The result still renders -- just lit as though the
+        // surface faced somewhere it does not.
+        matches!(color_space, TextureColorSpace::Srgb),
         bevy::image::ImageSampler::Default,
         RenderAssetUsages::default(),
     )?;
@@ -114,8 +138,12 @@ mod tests {
         // The pack carries encoded PNG rather than raw pixels, so this is the
         // step that turns a texture blob into something drawable. It had no
         // coverage at all until an adversarial review pointed that out.
-        let image = decode_texture(&tiny_png(), TextureSampling::Nearest)
-            .expect("a valid PNG should decode");
+        let image = decode_texture(
+            &tiny_png(),
+            TextureSampling::Nearest,
+            TextureColorSpace::Srgb,
+        )
+        .expect("a valid PNG should decode");
         assert_eq!(image.width(), 2);
         assert_eq!(image.height(), 2);
     }
@@ -125,8 +153,18 @@ mod tests {
         // Bilinear filtering bleeds neighbouring atlas swatches into each
         // other along every UV seam, so the sampler the material asked for
         // has to survive decoding.
-        let nearest = decode_texture(&tiny_png(), TextureSampling::Nearest).unwrap();
-        let linear = decode_texture(&tiny_png(), TextureSampling::Linear).unwrap();
+        let nearest = decode_texture(
+            &tiny_png(),
+            TextureSampling::Nearest,
+            TextureColorSpace::Srgb,
+        )
+        .unwrap();
+        let linear = decode_texture(
+            &tiny_png(),
+            TextureSampling::Linear,
+            TextureColorSpace::Srgb,
+        )
+        .unwrap();
         let is_nearest = |image: &Image| match &image.sampler {
             bevy::image::ImageSampler::Descriptor(d) => {
                 matches!(d.mag_filter, bevy::image::ImageFilterMode::Nearest)
@@ -139,8 +177,84 @@ mod tests {
 
     #[test]
     fn a_blob_that_is_not_a_png_fails_rather_than_panicking() {
-        assert!(decode_texture(b"definitely not a png", TextureSampling::Nearest).is_err());
-        assert!(decode_texture(&[], TextureSampling::Nearest).is_err());
+        assert!(decode_texture(
+            b"definitely not a png",
+            TextureSampling::Nearest,
+            TextureColorSpace::Srgb
+        )
+        .is_err());
+        assert!(decode_texture(&[], TextureSampling::Nearest, TextureColorSpace::Srgb).is_err());
+    }
+
+    #[test]
+    fn a_uv_mesh_gets_tangents_so_normal_maps_actually_apply() {
+        // Bevy's PBR shader drops its normal-mapping branch entirely when a
+        // mesh has no ATTRIBUTE_TANGENT. A bound normal map is then ignored
+        // silently -- the surface still renders, just without any of the
+        // relief the map exists to provide. An adversarial review caught this
+        // after the maps had been plumbed end to end and declared working.
+        let quad = MeshData {
+            positions: vec![
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [1.0, 1.0, 0.0],
+                [0.0, 1.0, 0.0],
+            ],
+            normals: vec![[0.0, 0.0, 1.0]; 4],
+            uvs: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+            indices: vec![0, 1, 2, 0, 2, 3],
+        };
+        let mesh = to_bevy_mesh(&quad);
+        assert!(
+            mesh.attribute(Mesh::ATTRIBUTE_TANGENT).is_some(),
+            "a mesh with UVs must carry tangents, or every normal map it is \
+             given is silently discarded by the shader"
+        );
+    }
+
+    #[test]
+    fn a_mesh_without_uvs_still_converts() {
+        // Tangent generation needs UVs. A procedural primitive has none, and
+        // must not be turned into a hard failure by the tangent step.
+        let tri = MeshData {
+            positions: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            normals: vec![[0.0, 0.0, 1.0]; 3],
+            uvs: vec![],
+            indices: vec![0, 1, 2],
+        };
+        let mesh = to_bevy_mesh(&tri);
+        assert!(mesh.attribute(Mesh::ATTRIBUTE_POSITION).is_some());
+        assert!(mesh.attribute(Mesh::ATTRIBUTE_TANGENT).is_none());
+    }
+
+    #[test]
+    fn data_maps_decode_linear_and_colour_decodes_srgb() {
+        // A normal map decoded as sRGB has every component bent through a
+        // gamma curve, so the surface lights as though it faced somewhere
+        // else. The failure is subtle on screen -- "the model looks a bit
+        // off" -- so the distinction is pinned here rather than by eye.
+        let colour = decode_texture(
+            &tiny_png(),
+            TextureSampling::Linear,
+            TextureColorSpace::Srgb,
+        )
+        .unwrap();
+        let data = decode_texture(
+            &tiny_png(),
+            TextureSampling::Linear,
+            TextureColorSpace::Linear,
+        )
+        .unwrap();
+        assert!(
+            format!("{:?}", colour.texture_descriptor.format).contains("Srgb"),
+            "base colour must decode as sRGB, got {:?}",
+            colour.texture_descriptor.format
+        );
+        assert!(
+            !format!("{:?}", data.texture_descriptor.format).contains("Srgb"),
+            "a normal or metallic-roughness map must NOT decode as sRGB, got {:?}",
+            data.texture_descriptor.format
+        );
     }
 
     #[test]

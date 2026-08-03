@@ -218,23 +218,85 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         col += params.tint.rgb * pip * (1.1 + glow);
         alpha = max(alpha, pip);
     } else if (kind == KIND_LADDER) {
-        // Pitch ladder: rungs every few degrees with a gap at the centre so
-        // the flight path marker stays readable. `value` is pitch in turns.
-        let pitch = params.a.y;
-        let spacing = 0.34;
-        for (var i = -3; i <= 3; i = i + 1) {
-            let y = f32(i) * spacing - fract(pitch * 8.0) * spacing;
-            if (abs(y) > 1.05) { continue; }
-            let inner = 0.16;
-            let outer = 0.62;
-            let l = sd_segment(p, vec2<f32>(-outer, y), vec2<f32>(-inner, y));
-            let r = sd_segment(p, vec2<f32>(inner, y), vec2<f32>(outer, y));
-            let m = aa_mask(min(l, r) - thick * 0.4);
-            // Rungs fade away from the centre so the horizon reads first.
-            let fade = 1.0 - clamp(abs(y), 0.0, 1.0) * 0.65;
+        // Attitude indicator: a pitch ladder that ROLLS with the ship and
+        // slides with pitch, plus a fixed centre bracket to read against.
+        // `value` is pitch in turns (-0.25..0.25 = -90..90 deg), `value2` is
+        // roll in turns. A ladder that does not rotate is decoration; this
+        // one is an instrument.
+        let pitch_turns = params.a.y;
+        let roll_turns = params.a.z;
+
+        // Fixed reference: a small centre bracket that never moves, because
+        // attitude is read as the ladder's offset FROM the aircraft symbol.
+        let ref_w = 0.30;
+        let refl = sd_segment(p, vec2<f32>(-ref_w, 0.0), vec2<f32>(-0.10, 0.0));
+        let refr = sd_segment(p, vec2<f32>(0.10, 0.0), vec2<f32>(ref_w, 0.0));
+        let refc = length(p) - thick * 1.1;
+        let refm = aa_mask(min(min(refl, refr), refc) - thick * 0.5);
+        col += params.tint.rgb * refm * (1.4 + glow);
+        alpha = max(alpha, refm);
+
+        // Everything below is in the rolled frame.
+        let ca = cos(-roll_turns * TAU);
+        let sa = sin(-roll_turns * TAU);
+        let q = vec2<f32>(p.x * ca - p.y * sa, p.x * sa + p.y * ca);
+
+        // Rungs every 10 degrees. Screen offset per degree is chosen so a
+        // full 90 degrees of pitch runs off the top of the instrument.
+        let per_deg = 0.055;
+        let pitch_deg = pitch_turns * 360.0;
+        for (var i = -9; i <= 9; i = i + 1) {
+            let rung_deg = f32(i) * 10.0;
+            let y = (rung_deg - pitch_deg) * per_deg;
+            if (abs(y) > 1.0) { continue; }
+            // The horizon is longer and solid; climb and dive rungs are
+            // shorter, and dive rungs are broken to read as "below".
+            let is_horizon = i == 0;
+            let outer = select(0.46, 0.80, is_horizon);
+            let inner = select(0.20, 0.14, is_horizon);
+            var d = 1e9;
+            if (is_horizon) {
+                d = min(
+                    sd_segment(q, vec2<f32>(-outer, y), vec2<f32>(-inner, y)),
+                    sd_segment(q, vec2<f32>(inner, y), vec2<f32>(outer, y)),
+                );
+            } else {
+                // Dashed for dives (negative), solid for climbs.
+                let dash = select(1.0, 0.55, rung_deg < 0.0);
+                let seg = (outer - inner) * dash;
+                d = min(
+                    sd_segment(q, vec2<f32>(-inner - seg, y), vec2<f32>(-inner, y)),
+                    sd_segment(q, vec2<f32>(inner, y), vec2<f32>(inner + seg, y)),
+                );
+                // Tick pointing toward the horizon, so up and down are
+                // distinguishable at a glance without reading the number.
+                let tip = select(-0.05, 0.05, rung_deg < 0.0);
+                d = min(d, sd_segment(q, vec2<f32>(-outer * dash - inner, y),
+                                       vec2<f32>(-outer * dash - inner, y + tip)));
+                d = min(d, sd_segment(q, vec2<f32>(outer * dash + inner, y),
+                                       vec2<f32>(outer * dash + inner, y + tip)));
+            }
+            let m = aa_mask(d - thick * 0.42);
+            let fade = 1.0 - clamp(abs(y), 0.0, 1.0) * 0.55;
             col += params.tint.rgb * m * fade;
             alpha = max(alpha, m * fade);
         }
+
+        // Roll scale: fixed arc of ticks at the top with a moving pointer, so
+        // bank angle is readable even when the horizon is off-screen.
+        let arc_r = 0.86;
+        for (var i = -4; i <= 4; i = i + 1) {
+            let a = f32(i) * 0.0833333; // 30 degrees apart, in turns
+            let dir = vec2<f32>(sin(a * TAU), cos(a * TAU));
+            let len = select(0.05, 0.09, (i % 3) == 0);
+            let m = aa_mask(sd_segment(p, dir * arc_r, dir * (arc_r + len)) - thick * 0.4);
+            col += params.dim.rgb * m;
+            alpha = max(alpha, m * 0.7);
+        }
+        let rp = vec2<f32>(sin(-roll_turns * TAU), cos(-roll_turns * TAU));
+        let pm = aa_mask(sd_segment(p, rp * (arc_r - 0.07), rp * arc_r) - thick * 0.8);
+        col += params.tint.rgb * pm * (1.4 + glow);
+        alpha = max(alpha, pm);
     } else if (kind == KIND_TAPE) {
         // Segmented tape with a set-point pin: the Elite throttle. Segments
         // make a glance enough to read the value; the pin is where you asked

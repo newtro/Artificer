@@ -8,6 +8,7 @@ use crate::{EngineCtx, FrameInfo, GameRes, InputRes, SceneRes};
 use artificer_scene::{LightDesc, MaterialDesc, MeshId, NodeId, NodeKind, SceneCommand, TextureId};
 use bevy::core_pipeline::bloom::Bloom;
 use bevy::input::mouse::{MouseMotion, MouseScrollUnit, MouseWheel};
+use bevy::pbr::NotShadowCaster;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use glam::Vec2 as GVec2;
@@ -15,7 +16,7 @@ use std::collections::HashMap;
 
 /// Adapter bookkeeping: scene ids -> Bevy entities/assets.
 #[derive(Resource, Default)]
-pub(crate) struct AdapterMaps {
+pub struct AdapterMaps {
     pub nodes: HashMap<NodeId, Entity>,
     pub meshes: HashMap<MeshId, Handle<Mesh>>,
     pub textures: HashMap<TextureId, Handle<Image>>,
@@ -79,6 +80,39 @@ pub(crate) fn collect_input(
     }
 }
 
+/// Build a world-space ray through the cursor from the camera that is
+/// actually drawing the scene.
+///
+/// Deliberately the SCENE camera from `AdapterMaps`, not "any active camera":
+/// a game with a pinned HUD overlay has more than one, and picking through
+/// the overlay camera would return rays into the instrument panel. That exact
+/// confusion already caused world labels to drift once.
+fn cursor_ray_from_scene_camera(
+    world: &mut World,
+    cursor: glam::Vec2,
+) -> Option<(glam::Vec3, glam::Vec3)> {
+    let owned: Vec<Entity> = world
+        .resource::<AdapterMaps>()
+        .camera_nodes
+        .values()
+        .copied()
+        .collect();
+    let mut cameras = world.query::<(Entity, &Camera, &GlobalTransform)>();
+    for (entity, camera, transform) in cameras.iter(world) {
+        if !owned.contains(&entity) || !camera.is_active {
+            continue;
+        }
+        let ray = camera
+            .viewport_to_world(transform, Vec2::new(cursor.x, cursor.y))
+            .ok()?;
+        return Some((
+            glam::Vec3::new(ray.origin.x, ray.origin.y, ray.origin.z),
+            glam::Vec3::new(ray.direction.x, ray.direction.y, ray.direction.z),
+        ));
+    }
+    None
+}
+
 fn with_ctx(world: &mut World, f: impl FnOnce(&mut dyn crate::GameClient, &mut EngineCtx)) {
     let dt = world.resource::<Time>().delta_secs();
     let elapsed = world.resource::<Time>().elapsed_secs();
@@ -92,6 +126,10 @@ fn with_ctx(world: &mut World, f: impl FnOnce(&mut dyn crate::GameClient, &mut E
         world.resource_scope(|world, mut hud: Mut<crate::HudBoard>| {
             world.resource_scope(|world, mut labels: Mut<crate::WorldLabels>| {
                 labels.0.clear();
+                // Read the cursor out before the ray query, so the &World
+                // borrow for InputRes does not outlive the &mut World it needs.
+                let cursor = world.resource::<InputRes>().0.mouse_position;
+                let cursor_ray = cursor_ray_from_scene_camera(world, cursor);
                 let input = world.resource::<InputRes>();
                 let mut ctx = EngineCtx {
                     scene: &mut scene.0,
@@ -101,6 +139,7 @@ fn with_ctx(world: &mut World, f: impl FnOnce(&mut dyn crate::GameClient, &mut E
                     window_size,
                     hud: &mut hud,
                     labels: &mut labels,
+                    cursor_ray,
                     exit_requested: false,
                     cursor_grab_request: None,
                 };
@@ -136,15 +175,46 @@ pub(crate) fn game_update(world: &mut World) {
 /// An id with no registered texture warns rather than silently rendering
 /// untextured: "the atlas did not load" and "this material has no atlas" look
 /// identical on screen and take very different fixes.
-fn resolve_texture(world: &World, material: &MaterialDesc) -> Option<Handle<Image>> {
-    let id = material.base_color_texture?;
-    match world.resource::<AdapterMaps>().textures.get(&id) {
-        Some(handle) => Some(handle.clone()),
-        None => {
-            log::warn!("material references texture {id:?}, which was never registered");
-            None
-        }
+/// Every image handle a material needs, resolved in one pass.
+///
+/// Resolved together and applied together, because these are the maps that
+/// make a surface look like itself: base colour alone renders a hard-surface
+/// asset as a smooth shape with its panel lines painted on. Binding them at
+/// one site means adding a map cannot leave a second call path still binding
+/// only the first.
+#[derive(Default)]
+struct MaterialMaps {
+    base_color: Option<Handle<Image>>,
+    normal: Option<Handle<Image>>,
+    metallic_roughness: Option<Handle<Image>>,
+    occlusion: Option<Handle<Image>>,
+}
+
+fn resolve_texture(world: &World, material: &MaterialDesc) -> MaterialMaps {
+    let textures = &world.resource::<AdapterMaps>().textures;
+    let one = |slot: Option<artificer_scene::TextureId>| match slot {
+        None => None,
+        Some(id) => match textures.get(&id) {
+            Some(handle) => Some(handle.clone()),
+            None => {
+                log::warn!("material references texture {id:?}, which was never registered");
+                None
+            }
+        },
+    };
+    MaterialMaps {
+        base_color: one(material.base_color_texture),
+        normal: one(material.normal_texture),
+        metallic_roughness: one(material.metallic_roughness_texture),
+        occlusion: one(material.occlusion_texture),
     }
+}
+
+fn apply_maps(target: &mut StandardMaterial, maps: MaterialMaps) {
+    target.base_color_texture = maps.base_color;
+    target.normal_map_texture = maps.normal;
+    target.metallic_roughness_texture = maps.metallic_roughness;
+    target.occlusion_texture = maps.occlusion;
 }
 
 pub(crate) fn apply_scene_commands(world: &mut World) {
@@ -167,8 +237,13 @@ pub(crate) fn apply_scene_commands(world: &mut World) {
                     .meshes
                     .insert(id, handle);
             }
-            SceneCommand::AddTexture { id, png, sampling } => {
-                match decode_texture(&png, sampling) {
+            SceneCommand::AddTexture {
+                id,
+                png,
+                sampling,
+                color_space,
+            } => {
+                match decode_texture(&png, sampling, color_space) {
                     Ok(image) => {
                         let handle = world.resource_mut::<Assets<Image>>().add(image);
                         world
@@ -198,20 +273,22 @@ pub(crate) fn apply_scene_commands(world: &mut World) {
                                 continue;
                             }
                         };
-                        let texture = resolve_texture(world, &material);
+                        let maps = resolve_texture(world, &material);
                         let mut std_material = to_std_material(&material);
-                        std_material.base_color_texture = texture;
+                        apply_maps(&mut std_material, maps);
                         let mat_handle = world
                             .resource_mut::<Assets<StandardMaterial>>()
                             .add(std_material);
-                        let entity = world
-                            .spawn((
-                                Mesh3d(mesh_handle),
-                                MeshMaterial3d(mat_handle.clone()),
-                                to_bevy_transform(&transform),
-                                Visibility::Inherited,
-                            ))
-                            .id();
+                        let mut spawned = world.spawn((
+                            Mesh3d(mesh_handle),
+                            MeshMaterial3d(mat_handle.clone()),
+                            to_bevy_transform(&transform),
+                            Visibility::Inherited,
+                        ));
+                        if !material.casts_shadows {
+                            spawned.insert(NotShadowCaster);
+                        }
+                        let entity = spawned.id();
                         world
                             .resource_mut::<AdapterMaps>()
                             .materials
@@ -328,11 +405,24 @@ pub(crate) fn apply_scene_commands(world: &mut World) {
                     // Resolve BEFORE borrowing the asset store, and apply the
                     // same binding as the spawn path -- otherwise changing a
                     // material at runtime silently drops its texture.
-                    let texture = resolve_texture(world, &material);
+                    let maps = resolve_texture(world, &material);
                     let mut materials = world.resource_mut::<Assets<StandardMaterial>>();
                     if let Some(mat) = materials.get_mut(&handle) {
                         *mat = to_std_material(&material);
-                        mat.base_color_texture = texture;
+                        apply_maps(mat, maps);
+                        // Shadow casting is a component, not a material field,
+                        // so replacing the material alone left the old marker
+                        // in place and the change had no effect.
+                        if let Some(entity) =
+                            world.resource::<AdapterMaps>().nodes.get(&id).copied()
+                        {
+                            let mut entity = world.entity_mut(entity);
+                            if material.casts_shadows {
+                                entity.remove::<NotShadowCaster>();
+                            } else {
+                                entity.insert(NotShadowCaster);
+                            }
+                        }
                     }
                 }
             }

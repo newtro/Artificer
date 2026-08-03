@@ -369,6 +369,27 @@ pub enum MaterialMapping {
     /// Share a texture atlas — the whole point of packs like Synty's, where
     /// one 2K page serves a library and every asset is one draw call.
     Atlas { texture: String },
+    /// A full PBR material set: base colour plus any of the maps that carry
+    /// the surface detail.
+    ///
+    /// [`MaterialMapping::Atlas`] binds base colour ALONE, which is right for
+    /// a palette atlas and wrong for anything generated: a modern generator
+    /// emits colour, normal, metallic-roughness and occlusion together, and
+    /// binding only the first throws away where the relief lives. An asset
+    /// bound as `Atlas` renders as a smooth shape with lines painted on it.
+    ///
+    /// Every map but `base_color` is optional, so a source that ships two of
+    /// the four does not have to pretend it has all of them.
+    Pbr {
+        base_color: String,
+        #[serde(default)]
+        normal: Option<String>,
+        /// glTF packing: roughness in G, metallic in B.
+        #[serde(default)]
+        metallic_roughness: Option<String>,
+        #[serde(default)]
+        occlusion: Option<String>,
+    },
     /// Explicit material, for sources whose own material cannot be honoured
     /// (e.g. meshes authored against a custom shader).
     Override(Box<MaterialDesc>),
@@ -759,6 +780,31 @@ impl ImportManifest {
                                 id,
                                 format!("references unknown atlas texture '{texture}'"),
                             ));
+                        }
+                    }
+                    MaterialMapping::Pbr {
+                        base_color,
+                        normal,
+                        metallic_roughness,
+                        occlusion,
+                    } => {
+                        // Check EVERY slot, not just base colour. A typo in
+                        // the normal map's id would otherwise bake happily
+                        // and simply render flat, which is indistinguishable
+                        // from not having authored one.
+                        for (slot, what) in [
+                            (Some(base_color), "base colour"),
+                            (normal.as_ref(), "normal"),
+                            (metallic_roughness.as_ref(), "metallic-roughness"),
+                            (occlusion.as_ref(), "occlusion"),
+                        ] {
+                            let Some(texture) = slot else { continue };
+                            if !self.textures.iter().any(|t| &t.id == texture) {
+                                issues.push(issue(
+                                    id,
+                                    format!("references unknown {what} texture '{texture}'"),
+                                ));
+                            }
                         }
                     }
                     MaterialMapping::Override(desc) => {

@@ -74,6 +74,37 @@ fn load_opts(target: ufbx::CoordinateAxes) -> ufbx::LoadOpts<'static> {
     }
 }
 
+/// Textures stored inside the FBX itself.
+///
+/// FBX keeps embedded media on `Video` elements: a filename and the encoded
+/// bytes. A file that references textures on disk instead simply has empty
+/// content, which is why zero-length blobs are dropped rather than reported
+/// as textures the caller can bind.
+fn embedded_textures(scene: &ufbx::Scene) -> Vec<(String, Vec<u8>)> {
+    let mut out = Vec::new();
+    for video in scene.videos.iter() {
+        if video.content.is_empty() {
+            continue;
+        }
+        // Prefer the file's own name for the map, so `..._Normal.jpg` binds as
+        // "normal" rather than as an opaque index. Deriving the role from
+        // ORDER is what makes a hand-rolled extractor swap the colour and
+        // roughness maps on the next model.
+        let stem = std::path::Path::new(&*video.relative_filename)
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let role = stem
+            .rsplit(['_', '-'])
+            .next()
+            .filter(|s| !s.is_empty())
+            .unwrap_or("texture")
+            .to_lowercase();
+        out.push((role, video.content.to_vec()));
+    }
+    out
+}
+
 /// Read a file into the neutral [`SourceScene`].
 ///
 /// Under [`AxisConvention::FromSource`] the file's own axis metadata is
@@ -103,6 +134,7 @@ pub fn read(path: &str, frame: AxisConvention) -> Result<SourceScene, ImportErro
     let mut out = SourceScene {
         declared_units_per_metre: Some(scene.settings.unit_meters as f32),
         declared_frame: Some(format!("{:?}", scene.settings.axes)),
+        embedded_textures: embedded_textures(&scene),
         ..Default::default()
     };
 
@@ -177,7 +209,14 @@ fn read_mesh(mesh: &ufbx::Mesh, name: &str, world: Mat4) -> Result<SourceMesh, I
         }
         if has_uvs {
             let uv = mesh.vertex_uv[i];
-            out.uvs.push([uv.x as f32, uv.y as f32]);
+            // FBX puts the V origin at the BOTTOM-left; glTF, and every
+            // renderer that follows it, put it at the top-left. Passing V
+            // through raw sends each UV island to the mirrored row of the
+            // atlas, which does not look like an error -- it looks like a
+            // ship painted in camouflage, because every island still lands on
+            // *some* texture. Cost an afternoon to find. Flip it here, at the
+            // one point where FBX's convention is known.
+            out.uvs.push([uv.x as f32, 1.0 - uv.y as f32]);
         }
     }
 

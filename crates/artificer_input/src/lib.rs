@@ -80,6 +80,9 @@ pub enum Key {
     Comma,
     Period,
     Slash,
+    /// The key left of `1` on a US layout; the conventional console or
+    /// debug-overlay toggle.
+    Backquote,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

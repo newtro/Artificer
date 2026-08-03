@@ -64,10 +64,28 @@ impl SceneGraph {
     /// Ids are allocated here rather than baked, so a pack never has to carry
     /// handle numbers that would differ between runs.
     pub fn add_texture(&mut self, png: Vec<u8>, sampling: TextureSampling) -> TextureId {
+        self.add_texture_in(png, sampling, TextureColorSpace::Srgb)
+    }
+
+    /// Register an image whose bytes are DATA rather than colour.
+    ///
+    /// Separate from [`SceneGraph::add_texture`] so the sRGB default stays
+    /// right for the common case while a normal map cannot be registered as
+    /// colour by omission -- the caller has to say what it is holding.
+    pub fn add_texture_in(
+        &mut self,
+        png: Vec<u8>,
+        sampling: TextureSampling,
+        color_space: TextureColorSpace,
+    ) -> TextureId {
         self.next_texture += 1;
         let id = TextureId(self.next_texture);
-        self.commands
-            .push(SceneCommand::AddTexture { id, png, sampling });
+        self.commands.push(SceneCommand::AddTexture {
+            id,
+            png,
+            sampling,
+            color_space,
+        });
         id
     }
 

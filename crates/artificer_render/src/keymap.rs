@@ -71,4 +71,5 @@ pub(crate) const KEY_PAIRS: &[(Key, KeyCode)] = &[
     (Key::Comma, KeyCode::Comma),
     (Key::Period, KeyCode::Period),
     (Key::Slash, KeyCode::Slash),
+    (Key::Backquote, KeyCode::Backquote),
 ];

@@ -20,6 +20,14 @@ pub struct WorldLabel {
 pub struct WorldLabels(pub Vec<WorldLabel>);
 
 impl WorldLabels {
+    /// Drop everything queued this frame.
+    ///
+    /// For screens that own the whole viewport: a full-screen UI with world
+    /// labels floating over it reads as two games at once.
+    pub fn clear(&mut self) {
+        self.0.clear();
+    }
+
     pub fn push(&mut self, text: impl Into<String>, world_pos: GVec3, color: [f32; 4], size: f32) {
         self.0.push(WorldLabel {
             text: text.into(),
@@ -47,6 +55,7 @@ impl Plugin for WorldLabelPlugin {
 #[allow(clippy::type_complexity)]
 fn project_world_labels(
     labels: Res<WorldLabels>,
+    maps: Res<crate::systems::AdapterMaps>,
     mut commands: Commands,
     cameras: Query<(&Camera, &GlobalTransform)>,
     mut pool: Query<
@@ -60,7 +69,18 @@ fn project_world_labels(
         With<LabelPoolNode>,
     >,
 ) {
-    let Some((camera, cam_transform)) = cameras.iter().find(|(c, _)| c.is_active) else {
+    // The active SCENE camera specifically. "Any active camera" was wrong the
+    // moment a game added one of its own: a pinned HUD camera sits at the
+    // origin, so projecting through it left every world label stuck to the
+    // viewport instead of to the thing it names.
+    let Some(scene_camera) = maps
+        .active_camera
+        .and_then(|id| maps.camera_nodes.get(&id))
+        .copied()
+    else {
+        return;
+    };
+    let Ok((camera, cam_transform)) = cameras.get(scene_camera) else {
         return;
     };
 

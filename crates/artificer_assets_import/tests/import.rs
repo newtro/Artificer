@@ -385,6 +385,7 @@ fn wedge() -> SourceScene {
         }],
         declared_units_per_metre: Some(1.0),
         declared_frame: None,
+        embedded_textures: vec![],
     }
 }
 

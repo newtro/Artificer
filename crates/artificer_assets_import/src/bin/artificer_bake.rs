@@ -121,6 +121,34 @@ fn run(args: &Args) -> Result<String, String> {
     let pack = import_manifest(root, &manifest).map_err(|e| e.to_string())?;
     let report = pack.size_report().map_err(|e| e.to_string())?;
 
+    // Per-asset dimensions under --verbose. A bake tool that will not tell
+    // you how big the thing it made is forces the caller to guess at
+    // placement, and guessing at placement is how a thruster ends up inside
+    // a hull.
+    if args.verbose {
+        for asset in &pack.assets {
+            let r = &asset.record;
+            let size = [
+                r.bounds_max[0] - r.bounds_min[0],
+                r.bounds_max[1] - r.bounds_min[1],
+                r.bounds_max[2] - r.bounds_min[2],
+            ];
+            eprintln!(
+                "  {:<18} {:>6.2} x {:>5.2} x {:>6.2} m   origin at [{:.2} {:.2} {:.2}]..[{:.2} {:.2} {:.2}]",
+                r.id,
+                size[0],
+                size[1],
+                size[2],
+                r.bounds_min[0],
+                r.bounds_min[1],
+                r.bounds_min[2],
+                r.bounds_max[0],
+                r.bounds_max[1],
+                r.bounds_max[2],
+            );
+        }
+    }
+
     match (&args.out, args.check_only) {
         (_, true) => Ok(format!("{report}\nchecked, nothing written")),
         (Some(out), false) => {

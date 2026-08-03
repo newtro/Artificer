@@ -40,6 +40,7 @@ use bevy::render::view::RenderLayers;
 mod instrument;
 mod material;
 mod skin;
+pub mod thumbnail;
 
 pub use instrument::{
     Contact, ContactKind, InstrumentKind, InstrumentMaterial, INSTRUMENT_SHADER_HANDLE,
@@ -158,6 +159,8 @@ pub struct ArtificerUiPlugin;
 
 impl Plugin for ArtificerUiPlugin {
     fn build(&self, app: &mut App) {
+        app.init_resource::<thumbnail::ThumbnailLayers>()
+            .add_systems(Update, thumbnail::tick_thumbnail_cameras);
         load_internal_asset!(
             app,
             PANEL_SHADER_HANDLE,

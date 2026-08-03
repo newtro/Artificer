@@ -10,7 +10,9 @@
 //! second thing to keep deterministic for no benefit.
 
 use crate::pack::AssetPack;
-use artificer_scene::{MaterialDesc, MeshId, SceneGraph, TextureId, TextureSampling};
+use artificer_scene::{
+    MaterialDesc, MeshId, SceneGraph, TextureColorSpace, TextureId, TextureSampling,
+};
 use std::collections::HashMap;
 
 use crate::manifest::SamplerMode;
@@ -32,6 +34,13 @@ pub struct LoadedPart {
 #[derive(Debug, Default)]
 pub struct LoadedPack {
     parts: HashMap<String, Vec<LoadedPart>>,
+    /// Asset id -> (min, max) in metres, straight from the record.
+    ///
+    /// A game placing anything against imported art needs its extent: an
+    /// engine plume has to clear the nacelle, a socket has to sit on a
+    /// surface. Without this the caller guesses, and a guess that is wrong by
+    /// a third of a metre puts the flame inside the engine.
+    bounds: HashMap<String, ([f32; 3], [f32; 3])>,
     materials: HashMap<String, MaterialDesc>,
     textures: HashMap<String, TextureId>,
 }
@@ -40,6 +49,11 @@ impl LoadedPack {
     /// Every drawable part of an asset, in submesh order.
     pub fn parts(&self, asset_id: &str) -> &[LoadedPart] {
         self.parts.get(asset_id).map(|v| &v[..]).unwrap_or(&[])
+    }
+
+    /// Axis-aligned bounds of a baked asset, in metres.
+    pub fn bounds(&self, asset_id: &str) -> Option<([f32; 3], [f32; 3])> {
+        self.bounds.get(asset_id).copied()
     }
 
     /// Mesh handle for a single-part asset.
@@ -75,6 +89,43 @@ impl LoadedPack {
     pub fn is_empty(&self) -> bool {
         self.parts.is_empty()
     }
+
+    /// Fold another loaded pack into this one.
+    ///
+    /// A game rarely ships one pack: art arrives per-theme, per-DLC, or as a
+    /// separate evaluation set, and every screen that resolves an asset id
+    /// wants ONE place to ask. Without this each caller carries a list of
+    /// packs and a lookup loop, and the day someone forgets the loop an
+    /// asset silently renders as nothing.
+    ///
+    /// Ids are global: a later pack that repeats an id WINS, which makes an
+    /// override pack work by simply loading last. Both packs must already
+    /// have been loaded into the same [`SceneGraph`], since the handles this
+    /// carries are that scene's -- the handles are meaningless in any other.
+    ///
+    /// Returns every asset id that was overwritten. Callers are expected to
+    /// SAY SO: a silent collision means an artist renames a mesh, two packs
+    /// quietly claim one id, and the wrong model ships. The caller knows
+    /// which files it read and can name them; this type does not.
+    ///
+    /// Note the overwritten pack's meshes and textures stay registered with
+    /// the scene. Nothing draws them, but they are not reclaimed either, so
+    /// merging is for load-time composition rather than hot-swapping.
+    #[must_use = "collisions mean two packs claim one id; report them"]
+    pub fn merge(&mut self, other: LoadedPack) -> Vec<String> {
+        let mut clashed: Vec<String> = other
+            .parts
+            .keys()
+            .filter(|id| self.parts.contains_key(*id))
+            .cloned()
+            .collect();
+        clashed.sort_unstable();
+        self.parts.extend(other.parts);
+        self.bounds.extend(other.bounds);
+        self.materials.extend(other.materials);
+        self.textures.extend(other.textures);
+        clashed
+    }
 }
 
 fn sampling_of(mode: SamplerMode) -> TextureSampling {
@@ -93,24 +144,65 @@ fn sampling_of(mode: SamplerMode) -> TextureSampling {
 pub fn load_pack(scene: &mut SceneGraph, pack: &AssetPack) -> LoadedPack {
     let mut loaded = LoadedPack::default();
 
+    // Which textures are DATA rather than colour has to be decided before any
+    // is registered, because the colour space is fixed at decode. A material
+    // naming a texture as its normal map is the only evidence available.
+    let mut linear: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    for material in &pack.materials {
+        for slot in [
+            &material.normal_texture,
+            &material.metallic_roughness_texture,
+            &material.occlusion_texture,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            linear.insert(slot.as_str());
+        }
+    }
+
     for texture in &pack.textures {
-        let id = scene.add_texture(texture.png.clone(), sampling_of(texture.sampler));
+        let space = if linear.contains(texture.id.as_str()) {
+            TextureColorSpace::Linear
+        } else {
+            TextureColorSpace::Srgb
+        };
+        let id = scene.add_texture_in(texture.png.clone(), sampling_of(texture.sampler), space);
         loaded.textures.insert(texture.id.clone(), id);
     }
 
     for material in &pack.materials {
         let mut desc = material.desc;
-        if let Some(texture_id) = &material.base_color_texture {
-            desc.base_color_texture = loaded.textures.get(texture_id).copied();
-            if desc.base_color_texture.is_none() {
+        // Every map resolves the same way: a string id in the pack becomes a
+        // handle here. Resolving them through one closure means a new map can
+        // never be added and then silently left unresolved, which is how a
+        // 4K normal map ends up shipped in the pack and never drawn.
+        let resolve = |slot: &Option<String>, what: &str| -> Option<TextureId> {
+            let id = slot.as_ref()?;
+            let handle = loaded.textures.get(id).copied();
+            if handle.is_none() {
                 log::warn!(
-                    "material '{}' wants texture '{texture_id}', which the pack does not carry",
+                    "material '{}' wants {what} texture '{id}', which the pack does not carry",
                     material.id
                 );
             }
-            if let Some(blob) = pack.texture(texture_id) {
-                desc.sampling = sampling_of(blob.sampler);
-            }
+            handle
+        };
+        desc.base_color_texture = resolve(&material.base_color_texture, "base colour");
+        desc.normal_texture = resolve(&material.normal_texture, "normal");
+        desc.metallic_roughness_texture =
+            resolve(&material.metallic_roughness_texture, "metallic-roughness");
+        desc.occlusion_texture = resolve(&material.occlusion_texture, "occlusion");
+
+        // Sampling follows the BASE COLOUR blob. The maps of one material are
+        // authored together and sampled together; letting a normal map's own
+        // setting win would mean one surface filtered two ways.
+        if let Some(blob) = material
+            .base_color_texture
+            .as_ref()
+            .and_then(|id| pack.texture(id))
+        {
+            desc.sampling = sampling_of(blob.sampler);
         }
         loaded.materials.insert(material.id.clone(), desc);
     }
@@ -142,6 +234,10 @@ pub fn load_pack(scene: &mut SceneGraph, pack: &AssetPack) -> LoadedPack {
             };
             parts.push(LoadedPart { mesh, material });
         }
+        loaded.bounds.insert(
+            asset.record.id.clone(),
+            (asset.record.bounds_min, asset.record.bounds_max),
+        );
         loaded.parts.insert(asset.record.id.clone(), parts);
     }
 
@@ -239,6 +335,9 @@ mod tests {
             id: "atlas.page_a".into(),
             desc: MaterialDesc::default(),
             base_color_texture: Some("page_a".into()),
+            normal_texture: None,
+            metallic_roughness_texture: None,
+            occlusion_texture: None,
         });
         for id in ["ship.one", "ship.two"] {
             let mesh = procmesh::cuboid(1.0, 1.0, 1.0);
@@ -362,6 +461,9 @@ mod tests {
                 id: id.into(),
                 desc: MaterialDesc::color(colour, colour, colour),
                 base_color_texture: None,
+                normal_texture: None,
+                metallic_roughness_texture: None,
+                occlusion_texture: None,
             });
         }
         pack.canonicalize();

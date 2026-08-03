@@ -15,6 +15,14 @@ mod systems;
 pub use bevy;
 pub use labels::{WorldLabel, WorldLabels};
 
+/// Scene handles as the renderer sees them.
+///
+/// Exposed so client crates can build things out of meshes the scene graph
+/// already owns -- UI thumbnails of real geometry, for one -- without every
+/// game re-uploading its own copy. Read-only by convention: the adapter owns
+/// these and rebuilds them from scene commands.
+pub use systems::AdapterMaps;
+
 use artificer_input::InputState;
 use artificer_scene::SceneGraph;
 use bevy::prelude::*;
@@ -66,11 +74,47 @@ pub struct EngineCtx<'a> {
     pub hud: &'a mut HudBoard,
     /// World-space labels to render this frame (cleared each frame).
     pub labels: &'a mut WorldLabels,
+    /// Ray through the cursor from the active scene camera, in world space,
+    /// as `(origin, unit direction)`.
+    ///
+    /// `None` when there is no active scene camera or the cursor is outside
+    /// the window. This is the primitive 3D picking needs -- pick a gizmo,
+    /// aim at a world-space panel (see `artificer_ui::raycast_panel`), click
+    /// a thing in the world -- and it has to come from the engine because
+    /// only the engine knows which camera is actually drawing the scene.
+    pub cursor_ray: Option<(Vec3, Vec3)>,
     pub(crate) exit_requested: bool,
     pub(crate) cursor_grab_request: Option<bool>,
 }
 
 impl EngineCtx<'_> {
+    /// Where the cursor ray meets a sphere, if it does. Distance along the
+    /// ray, so callers can keep the NEAREST hit when several overlap.
+    pub fn ray_hits_sphere(&self, centre: Vec3, radius: f32) -> Option<f32> {
+        let (origin, dir) = self.cursor_ray?;
+        let to_centre = centre - origin;
+        let along = to_centre.dot(dir);
+        let miss_sq = to_centre.length_squared() - along * along;
+        let radius_sq = radius * radius;
+        if miss_sq > radius_sq {
+            return None;
+        }
+        // Distance to where the ray ENTERS the sphere, not to the point
+        // nearest its centre. Callers keep the nearest hit, and the two
+        // orderings disagree whenever the radii differ -- a big far gizmo
+        // would win over a small near one.
+        let half_chord = (radius_sq - miss_sq).max(0.0).sqrt();
+        let entry = along - half_chord;
+        let hit = if entry >= 0.0 {
+            entry
+        } else {
+            along + half_chord
+        };
+        // Behind the camera counts as a miss; otherwise something at your back
+        // is pickable through your own head.
+        (hit >= 0.0).then_some(hit)
+    }
+
     pub fn request_exit(&mut self) {
         self.exit_requested = true;
     }

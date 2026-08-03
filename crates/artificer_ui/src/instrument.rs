@@ -127,6 +127,16 @@ impl InstrumentMaterial {
         }
     }
 
+    /// Attitude: pitch and roll, both in turns (0.25 = 90 degrees).
+    ///
+    /// Kept in turns rather than degrees because every angle in the shader is
+    /// a turn, and converting in one place beats converting in six.
+    pub fn set_attitude(&mut self, pitch_turns: f32, roll_turns: f32) -> &mut Self {
+        self.a.y = pitch_turns;
+        self.a.z = roll_turns;
+        self
+    }
+
     /// Primary reading, 0..1.
     pub fn set_value(&mut self, value: f32) -> &mut Self {
         self.a.y = value.clamp(0.0, 1.0);
@@ -332,6 +342,15 @@ mod tests {
         assert_eq!(m.tint.w, 0.3);
         m.set_opacity(5.0);
         assert_eq!(m.tint.w, 1.0, "clamped");
+    }
+
+    #[test]
+    fn attitude_is_not_clamped_because_a_ship_can_point_anywhere() {
+        // Unlike a gauge, attitude has no 0..1 range: inverted flight is
+        // ordinary, and clamping it would peg the horizon at the edge.
+        let mut m = mat(InstrumentKind::Ladder);
+        m.set_attitude(-0.2, 0.5);
+        assert_eq!((m.a.y, m.a.z), (-0.2, 0.5));
     }
 
     #[test]

@@ -54,6 +54,18 @@ pub struct SourceScene {
     /// facing the wrong way.
     pub declared_units_per_metre: Option<f32>,
     pub declared_frame: Option<String>,
+    /// Textures carried INSIDE the file, as `(role, encoded bytes)`.
+    ///
+    /// Generators that emit a single self-contained file -- Tripo returns one
+    /// FBX with its colour, normal, roughness and metallic maps embedded and
+    /// no separate URLs -- would otherwise need the bytes fishing out by hand.
+    /// Doing that by scanning for JPEG magic numbers works right up until it
+    /// mislabels which map is which.
+    ///
+    /// `role` is the stem of the file's own name for the texture, lowercased
+    /// (`color`, `normal`, `roughness`, `metallic`), so a manifest can bind by
+    /// meaning rather than by index.
+    pub embedded_textures: Vec<(String, Vec<u8>)>,
 }
 
 impl SourceScene {

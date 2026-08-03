@@ -26,6 +26,23 @@ pub enum TextureSampling {
     Linear,
 }
 
+/// Whether a texture's bytes are colour or DATA.
+///
+/// Getting this wrong is invisible in the asset and visible only in the
+/// lighting. A normal map decoded as sRGB has every component pushed through
+/// a gamma curve, so its vectors no longer point where they should and the
+/// surface lights as though lit from somewhere else -- subtly, in a way that
+/// reads as "the model looks a bit off" rather than as a bug. Base colour is
+/// sRGB; normal, metallic-roughness and occlusion are linear.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum TextureColorSpace {
+    /// Colour, gamma-encoded. Base colour and emissive.
+    #[default]
+    Srgb,
+    /// Raw values. Normal, metallic-roughness, occlusion.
+    Linear,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct TransformDesc {
     pub translation: Vec3,
@@ -136,6 +153,28 @@ pub struct MaterialDesc {
     /// [`TextureId`] at load, which is why baking never has to invent handle
     /// numbers that would differ between runs.
     pub base_color_texture: Option<TextureId>,
+    /// Tangent-space normal map.
+    ///
+    /// This is where a hard-surface asset's detail actually lives. Panel
+    /// gaps, rivets, vents and recesses are almost never geometry on a
+    /// game-budget hull -- they are relief in this map, and without it the
+    /// same asset reads as a smooth shape with lines PAINTED on it. A
+    /// generated ship with a 4K normal map bound looks like its concept art;
+    /// the same ship with only base colour looks like a toy.
+    pub normal_texture: Option<TextureId>,
+    /// Combined metallic-roughness map, glTF convention: roughness in G,
+    /// metallic in B.
+    ///
+    /// One texture rather than two because that is how glTF packs it and how
+    /// every generator emits it; splitting them here would mean recombining
+    /// them for the renderer anyway. Scales `metallic` and `roughness`.
+    pub metallic_roughness_texture: Option<TextureId>,
+    /// Baked ambient occlusion, in R.
+    ///
+    /// Cheap contact darkening. It is what makes a panel gap read as a gap
+    /// rather than as a dark line, and it costs nothing at runtime because
+    /// the shadowing is already baked.
+    pub occlusion_texture: Option<TextureId>,
     pub sampling: TextureSampling,
     pub base_color: [f32; 4],
     pub metallic: f32,
@@ -144,12 +183,25 @@ pub struct MaterialDesc {
     pub unlit: bool,
     pub alpha: AlphaModeDesc,
     pub double_sided: bool,
+    /// Whether this surface is rendered into shadow maps.
+    ///
+    /// Defaults to true, because most geometry should occlude light. Turn it
+    /// off for things that are *depicting* a light source rather than being
+    /// lit by one -- a star billboard, a sky dome, a glowing volume. A
+    /// directional light's shadow pass is orthographic along the light axis,
+    /// so a sun sphere modelled at the light's own position sits between that
+    /// light and the entire scene and shadows all of it.
+    pub casts_shadows: bool,
 }
 
 impl Default for MaterialDesc {
     fn default() -> Self {
         Self {
+            casts_shadows: true,
             base_color_texture: None,
+            normal_texture: None,
+            metallic_roughness_texture: None,
+            occlusion_texture: None,
             sampling: TextureSampling::Nearest,
             base_color: [0.8, 0.8, 0.8, 1.0],
             metallic: 0.0,
@@ -180,10 +232,15 @@ impl MaterialDesc {
     }
 
     /// Emissive surface; `intensity` > 1 blooms on HDR cameras.
+    /// A surface that depicts a light source.
+    ///
+    /// Non-casting by construction: something that glows is being seen, not
+    /// blocking the view of something else.
     pub fn glow(r: f32, g: f32, b: f32, intensity: f32) -> Self {
         Self {
             base_color: [0.0, 0.0, 0.0, 1.0],
             emissive: [r * intensity, g * intensity, b * intensity],
+            casts_shadows: false,
             ..Default::default()
         }
     }
@@ -285,6 +342,7 @@ pub enum SceneCommand {
         id: TextureId,
         png: Vec<u8>,
         sampling: TextureSampling,
+        color_space: TextureColorSpace,
     },
     Spawn {
         id: NodeId,
