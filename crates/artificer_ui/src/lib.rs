@@ -37,11 +37,15 @@ use bevy::render::render_asset::RenderAssetUsages;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat, TextureUsages};
 use bevy::render::view::RenderLayers;
 
+pub mod browser;
 pub mod drag;
 pub mod hit;
 mod instrument;
 mod material;
+pub mod preview;
+pub mod scroll;
 mod skin;
+pub mod split;
 pub mod thumbnail;
 
 pub use instrument::{
@@ -162,7 +166,16 @@ pub struct ArtificerUiPlugin;
 impl Plugin for ArtificerUiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<thumbnail::ThumbnailLayers>()
-            .add_systems(Update, thumbnail::tick_thumbnail_cameras);
+            .add_systems(
+                Update,
+                (
+                    thumbnail::tick_thumbnail_cameras,
+                    scroll::scroll_hovered_views,
+                    split::drive_splitters,
+                ),
+            )
+            .init_resource::<split::SplitterDrag>()
+            .add_plugins(preview::PreviewPlugin);
         load_internal_asset!(
             app,
             PANEL_SHADER_HANDLE,

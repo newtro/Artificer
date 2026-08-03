@@ -21,6 +21,7 @@ pub use labels::{WorldLabel, WorldLabels};
 /// already owns -- UI thumbnails of real geometry, for one -- without every
 /// game re-uploading its own copy. Read-only by convention: the adapter owns
 /// these and rebuilds them from scene commands.
+pub use convert::material_from_desc;
 pub use systems::AdapterMaps;
 
 use artificer_input::InputState;

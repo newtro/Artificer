@@ -80,6 +80,28 @@ pub(crate) fn decode_texture(
     Ok(image)
 }
 
+/// Build a renderable material from a scene description, resolving every
+/// texture slot through the adapter maps.
+///
+/// Exposed because anything that draws pack geometry OUTSIDE the scene graph
+/// — icon captures, an asset browser's turntable, an editor gizmo — needs the
+/// same conversion the adapter does, and hand-rolling it in a game crate has
+/// already gone wrong once: a copy that bound `base_color_texture` alone
+/// rendered hard-surface art as a smooth shape with lines painted on it,
+/// because the relief lives in the normal map. Callers get all four slots or
+/// none.
+pub fn material_from_desc(desc: &MaterialDesc, maps: &crate::AdapterMaps) -> StandardMaterial {
+    let mut material = to_std_material(desc);
+    let one = |slot: Option<artificer_scene::TextureId>| {
+        slot.and_then(|id| maps.textures.get(&id).cloned())
+    };
+    material.base_color_texture = one(desc.base_color_texture);
+    material.normal_map_texture = one(desc.normal_texture);
+    material.metallic_roughness_texture = one(desc.metallic_roughness_texture);
+    material.occlusion_texture = one(desc.occlusion_texture);
+    material
+}
+
 pub(crate) fn to_std_material(desc: &MaterialDesc) -> StandardMaterial {
     let [r, g, b, a] = desc.base_color;
     let [er, eg, eb] = desc.emissive;
