@@ -99,6 +99,7 @@ pub fn material_from_desc(desc: &MaterialDesc, maps: &crate::AdapterMaps) -> Sta
     material.normal_map_texture = one(desc.normal_texture);
     material.metallic_roughness_texture = one(desc.metallic_roughness_texture);
     material.occlusion_texture = one(desc.occlusion_texture);
+    material.emissive_texture = one(desc.emissive_texture);
     material
 }
 

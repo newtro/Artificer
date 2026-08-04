@@ -175,6 +175,21 @@ pub struct MaterialDesc {
     /// rather than as a dark line, and it costs nothing at runtime because
     /// the shadowing is already baked.
     pub occlusion_texture: Option<TextureId>,
+    /// Emissive map, multiplied by `emissive`.
+    ///
+    /// This is how a surface glows in *places* rather than all over: lava
+    /// cracks, city lights on a night side, lit windows. A uniform `emissive`
+    /// colour makes the whole body radiate evenly, which reads as a lamp
+    /// shade, not a world. Set `emissive` to white (or an HDR multiplier) to
+    /// use the map's own colours.
+    ///
+    /// `serde(skip)`, deliberately: packs serialize `MaterialDesc` with
+    /// POSITIONAL postcard, so a new serialized field invalidates every
+    /// baked v3 `.apack` in the wild. Emissive maps are runtime-generated
+    /// (procgen) today and the pack pipeline has no emissive slot anyway;
+    /// when packs learn emissive, add it there and bump PACK_FORMAT_VERSION.
+    #[serde(skip)]
+    pub emissive_texture: Option<TextureId>,
     pub sampling: TextureSampling,
     pub base_color: [f32; 4],
     pub metallic: f32,
@@ -202,6 +217,7 @@ impl Default for MaterialDesc {
             normal_texture: None,
             metallic_roughness_texture: None,
             occlusion_texture: None,
+            emissive_texture: None,
             sampling: TextureSampling::Nearest,
             base_color: [0.8, 0.8, 0.8, 1.0],
             metallic: 0.0,
@@ -317,11 +333,75 @@ impl Default for EnvironmentDesc {
     }
 }
 
+/// A planet's scattering atmosphere, rendered as an additive shell.
+///
+/// The shell *mesh* only provides screen coverage — the shader does analytic
+/// ray-sphere intersection against the radii below, so the mesh should be a
+/// sphere of `atmosphere_radius` around the same origin as the planet. The
+/// planet's world-space centre is taken from the node transform (the adapter
+/// keeps the shader in sync when the node moves), which is why there is no
+/// `center` field here.
+///
+/// Colour comes from `rayleigh`: per-channel scattering strength. Light that
+/// scatters toward the camera is tinted by these coefficients; light that
+/// *passes through* has them subtracted, which is what makes the terminator
+/// ring glow in the complementary colour — an Earth-blue atmosphere gets
+/// orange sunsets for free.
+///
+/// Limitations by design (the cheap tier): single scattering, and the camera
+/// is assumed OUTSIDE the shell. Both are the right trade for orbital
+/// scenery; ground-level skies are a different feature.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct AtmosphereDesc {
+    /// Radius of the solid body, in world units.
+    pub planet_radius: f32,
+    /// Outer radius of the scattering shell. ~1.05–1.15 × planet radius
+    /// reads as thin/earthlike; more reads as thick/soupy.
+    pub atmosphere_radius: f32,
+    /// Per-channel Rayleigh scattering coefficients, per world unit.
+    /// Direction sets the colour; magnitude sets the density.
+    pub rayleigh: [f32; 3],
+    /// Altitude (world units) over which Rayleigh density falls by 1/e.
+    pub rayleigh_scale_height: f32,
+    /// Mie (haze) scattering coefficient, per world unit. Colourless.
+    pub mie: f32,
+    /// Altitude (world units) over which Mie density falls by 1/e.
+    pub mie_scale_height: f32,
+    /// Mie phase anisotropy, 0 = isotropic, →1 = tight forward glare.
+    pub mie_g: f32,
+    /// World-space position of the light source the shell scatters.
+    pub sun_position: [f32; 3],
+    /// Scattered-light intensity multiplier (HDR; drives bloom).
+    pub sun_intensity: f32,
+}
+
+impl Default for AtmosphereDesc {
+    fn default() -> Self {
+        Self {
+            planet_radius: 1.0,
+            atmosphere_radius: 1.1,
+            // Earth-like blue: strengths ∝ 1/λ⁴, scaled for a unit planet.
+            rayleigh: [5.5, 13.0, 28.4],
+            rayleigh_scale_height: 0.02,
+            mie: 2.0,
+            mie_scale_height: 0.01,
+            mie_g: 0.76,
+            sun_position: [0.0, 0.0, 1.0e6],
+            sun_intensity: 22.0,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum NodeKind {
     Mesh {
         mesh: MeshId,
         material: MaterialDesc,
+    },
+    /// Scattering shell over a planet (see [`AtmosphereDesc`]).
+    Atmosphere {
+        mesh: MeshId,
+        atmosphere: AtmosphereDesc,
     },
     Light(LightDesc),
     Camera(CameraDesc),
@@ -370,5 +450,20 @@ pub enum SceneCommand {
     },
     SetEnvironment {
         env: EnvironmentDesc,
+    },
+    // New variants go at the END: postcard encodes the variant INDEX, so an
+    // insertion above renumbers everything below it and old recordings
+    // decode as the wrong command with a plausible payload.
+    /// Forget a registered mesh (see ADR-0005). DEREGISTRATION, not
+    /// destruction: nodes already spawned keep their own handles and render
+    /// on; the GPU asset is freed once the last of them despawns. After
+    /// this, new spawns naming the id get the "unknown mesh" warning.
+    RemoveMesh {
+        id: MeshId,
+    },
+    /// Forget a registered texture. Same semantics as [`RemoveMesh`]:
+    /// materials already built keep the image alive until their nodes go.
+    RemoveTexture {
+        id: TextureId,
     },
 }

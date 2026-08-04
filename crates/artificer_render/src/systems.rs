@@ -188,6 +188,7 @@ struct MaterialMaps {
     normal: Option<Handle<Image>>,
     metallic_roughness: Option<Handle<Image>>,
     occlusion: Option<Handle<Image>>,
+    emissive: Option<Handle<Image>>,
 }
 
 fn resolve_texture(world: &World, material: &MaterialDesc) -> MaterialMaps {
@@ -207,6 +208,7 @@ fn resolve_texture(world: &World, material: &MaterialDesc) -> MaterialMaps {
         normal: one(material.normal_texture),
         metallic_roughness: one(material.metallic_roughness_texture),
         occlusion: one(material.occlusion_texture),
+        emissive: one(material.emissive_texture),
     }
 }
 
@@ -215,6 +217,7 @@ fn apply_maps(target: &mut StandardMaterial, maps: MaterialMaps) {
     target.normal_map_texture = maps.normal;
     target.metallic_roughness_texture = maps.metallic_roughness;
     target.occlusion_texture = maps.occlusion;
+    target.emissive_texture = maps.emissive;
 }
 
 pub(crate) fn apply_scene_commands(world: &mut World) {
@@ -294,6 +297,31 @@ pub(crate) fn apply_scene_commands(world: &mut World) {
                             .materials
                             .insert(id, mat_handle);
                         entity
+                    }
+                    NodeKind::Atmosphere { mesh, atmosphere } => {
+                        let mesh_handle = match world.resource::<AdapterMaps>().meshes.get(&mesh) {
+                            Some(h) => h.clone(),
+                            None => {
+                                log::warn!("atmosphere references unknown mesh {mesh:?}");
+                                continue;
+                            }
+                        };
+                        let material =
+                            crate::atmosphere::AtmosphereMaterial::from_desc(&atmosphere);
+                        let mat_handle = world
+                            .resource_mut::<Assets<crate::atmosphere::AtmosphereMaterial>>()
+                            .add(material);
+                        // A shell of added light: never a shadow caster, and
+                        // there is nothing PBR to track in `materials`.
+                        world
+                            .spawn((
+                                Mesh3d(mesh_handle),
+                                MeshMaterial3d(mat_handle),
+                                to_bevy_transform(&transform),
+                                Visibility::Inherited,
+                                NotShadowCaster,
+                            ))
+                            .id()
                     }
                     NodeKind::Light(light) => match light {
                         LightDesc::Directional {
@@ -424,6 +452,29 @@ pub(crate) fn apply_scene_commands(world: &mut World) {
                             }
                         }
                     }
+                }
+            }
+            SceneCommand::RemoveMesh { id } => {
+                // Dropping the map's handle is the whole job: entities
+                // still using the mesh hold their own strong handles, so
+                // Bevy frees the GPU asset when the last of those despawns.
+                if world
+                    .resource_mut::<AdapterMaps>()
+                    .meshes
+                    .remove(&id)
+                    .is_none()
+                {
+                    log::warn!("remove of unregistered mesh {id:?} (double release?)");
+                }
+            }
+            SceneCommand::RemoveTexture { id } => {
+                if world
+                    .resource_mut::<AdapterMaps>()
+                    .textures
+                    .remove(&id)
+                    .is_none()
+                {
+                    log::warn!("remove of unregistered texture {id:?} (double release?)");
                 }
             }
             SceneCommand::Despawn { id } => {

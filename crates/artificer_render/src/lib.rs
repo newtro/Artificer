@@ -7,6 +7,7 @@
 //! here as [`bevy`] (see engine ADR-0002) for custom materials and UI.
 //! Domain/protocol/server crates must never depend on this crate.
 
+pub mod atmosphere;
 mod convert;
 mod keymap;
 pub mod labels;
@@ -206,7 +207,8 @@ pub fn run_app(config: RenderConfig, game: impl GameClient) {
 
     game.register_bevy(&mut app);
 
-    app.add_plugins(labels::WorldLabelPlugin)
+    app.add_plugins(atmosphere::AtmospherePlugin)
+        .add_plugins(labels::WorldLabelPlugin)
         .insert_resource(SceneRes(SceneGraph::new()))
         .insert_resource(InputRes(InputState::new()))
         .insert_resource(HudBoard::default())

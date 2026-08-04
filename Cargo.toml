@@ -7,6 +7,7 @@ members = [
     "crates/artificer_input",
     "crates/artificer_assets",
     "crates/artificer_assets_import",
+    "crates/artificer_procgen",
     "crates/artificer_render",
     "crates/artificer_ui",
     "crates/artificer_net",
@@ -16,6 +17,7 @@ members = [
     "samples/model_viewer",
     "samples/asset_import",
     "samples/ui_panels",
+    "samples/planets",
 ]
 
 [workspace.package]
@@ -31,6 +33,7 @@ artificer_physics = { path = "crates/artificer_physics" }
 artificer_input = { path = "crates/artificer_input" }
 artificer_assets = { path = "crates/artificer_assets" }
 artificer_assets_import = { path = "crates/artificer_assets_import" }
+artificer_procgen = { path = "crates/artificer_procgen" }
 artificer_render = { path = "crates/artificer_render" }
 artificer_ui = { path = "crates/artificer_ui" }
 artificer_net = { path = "crates/artificer_net" }
@@ -38,6 +41,12 @@ artificer_agent = { path = "crates/artificer_agent" }
 artificer_testkit = { path = "crates/artificer_testkit" }
 
 glam = { version = "0.29", features = ["serde"] }
+# Composable noise graphs (Fbm/Ridged/etc.) for artificer_procgen. Chosen per
+# the planet-generation research doc: permissive, pure Rust, 3D-native.
+noise = { version = "0.9", default-features = false }
+# Minimal PNG encoder for baked procedural textures (the scene API transports
+# textures as encoded PNG; see SceneCommand::AddTexture).
+png = "0.17"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rapier3d = "0.34"

@@ -190,6 +190,37 @@ pub fn torus(
     mesh
 }
 
+/// Flat ring (annulus) in the XZ plane facing +Y.
+///
+/// UV.x runs RADIALLY: 0 at the inner edge, 1 at the outer. UV.y runs around
+/// the circumference. That orientation exists for one consumer pattern:
+/// planetary rings sample a 1-D radial strip texture, so a ring texture is
+/// just an Nx1 image and the mesh brings the mapping.
+pub fn annulus(inner_radius: f32, outer_radius: f32, segments: u32) -> MeshData {
+    let segments = segments.max(8);
+    let mut mesh = MeshData::default();
+    for s in 0..=segments {
+        let v = s as f32 / segments as f32;
+        let phi = v * TAU;
+        let (sin_p, cos_p) = phi.sin_cos();
+        let dir = Vec3::new(cos_p, 0.0, sin_p);
+        mesh.positions.push((dir * inner_radius).to_array());
+        mesh.normals.push([0.0, 1.0, 0.0]);
+        mesh.uvs.push([0.0, v]);
+        mesh.positions.push((dir * outer_radius).to_array());
+        mesh.normals.push([0.0, 1.0, 0.0]);
+        mesh.uvs.push([1.0, v]);
+    }
+    for s in 0..segments {
+        let a = s * 2; // inner edge, this segment
+        let b = a + 1; // outer edge, this segment
+        let c = a + 2; // inner edge, next segment
+        let d = a + 3; // outer edge, next segment
+        mesh.indices.extend_from_slice(&[a, c, b, b, c, d]);
+    }
+    mesh
+}
+
 /// Flat quad in the XZ plane facing +Y (`size` on each side).
 pub fn quad_xz(size_x: f32, size_z: f32) -> MeshData {
     let (hx, hz) = (size_x * 0.5, size_z * 0.5);
